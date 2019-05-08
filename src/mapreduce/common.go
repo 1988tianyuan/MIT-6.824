@@ -6,12 +6,12 @@ import (
 )
 
 // Debugging enabled?
-const debugEnabled = false
+const debugEnabled = true
 
 // debug() will only print if debugEnabled is true
-func debug(format string, a ...interface{}) (n int, err error) {
+func debug(format string, a ...interface{}) {
 	if debugEnabled {
-		n, err = fmt.Printf(format, a...)
+		fmt.Printf(format, a...)
 	}
 	return
 }
