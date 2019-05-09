@@ -40,9 +40,11 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 			args := <- taskChan
 			ok := call(worker, MrRpcName, args, nil)
 			if ok == false {
-				fmt.Printf("Schedule: call worker to doTask %v failed, task file is: {%v} \n", phase, args.File)
+				fmt.Printf("Schedule: call worker to doTask %v failed, task file is: {%v}, let other work do this work\n", phase, args.File)
+				taskChan <- args
+			} else {
+				taskWg.Done()
 			}
-			taskWg.Done()
 		}
 		fmt.Printf("no task for %s task\n", phase)
 	})

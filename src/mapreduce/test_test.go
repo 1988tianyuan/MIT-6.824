@@ -197,9 +197,9 @@ func TestParallelCheck(t *testing.T) {
 func TestOneFailure(t *testing.T) {
 	mr := setup()
 	// Start 2 workers that fail after 10 tasks
-	go RunWorker(mr.address, port("worker"+strconv.Itoa(0)),
+	go RunWorker(mr.address, winPort(1),
 		MapFunc, ReduceFunc, 10, nil)
-	go RunWorker(mr.address, port("worker"+strconv.Itoa(1)),
+	go RunWorker(mr.address, winPort(2),
 		MapFunc, ReduceFunc, -1, nil)
 	mr.Wait()
 	check(t, mr.files)
