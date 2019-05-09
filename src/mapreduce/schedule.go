@@ -3,6 +3,7 @@ package mapreduce
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 const MrRpcName = "Worker.DoTask"
@@ -35,8 +36,10 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		args := makeArgs(jobName, mapFiles, phase, i, nOther, i)
 		taskChan <- args
 	}
+
+	remainedTask := int64(nTasks)
 	go fetchWorkers(registerChan, func(worker string) {
-		for len(taskChan) > 0 {
+		for remainedTask > 0 {
 			args := <- taskChan
 			ok := call(worker, MrRpcName, args, nil)
 			if ok == false {
@@ -44,6 +47,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 				taskChan <- args
 			} else {
 				taskWg.Done()
+				atomic.CompareAndSwapInt64(&remainedTask, remainedTask, remainedTask-1)
 			}
 		}
 		fmt.Printf("no task for %s task\n", phase)

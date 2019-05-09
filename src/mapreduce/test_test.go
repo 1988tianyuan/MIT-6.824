@@ -219,10 +219,10 @@ func TestManyFailures(t *testing.T) {
 			break
 		default:
 			// Start 2 workers each sec. The workers fail after 10 tasks
-			w := port("worker" + strconv.Itoa(i))
+			w := winPort(i)
 			go RunWorker(mr.address, w, MapFunc, ReduceFunc, 10, nil)
 			i++
-			w = port("worker" + strconv.Itoa(i))
+			w = winPort(i)
 			go RunWorker(mr.address, w, MapFunc, ReduceFunc, 10, nil)
 			i++
 			time.Sleep(1 * time.Second)
