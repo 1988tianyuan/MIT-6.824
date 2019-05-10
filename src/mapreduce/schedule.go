@@ -37,10 +37,15 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		taskChan <- args
 	}
 
+
 	remainedTask := int64(nTasks)
 	go fetchWorkers(registerChan, func(worker string) {
 		for remainedTask > 0 {
-			args := <- taskChan
+			args, open := <- taskChan
+			fmt.Printf("taskChan is open? :{%v}, and args is {%v}\n", open, args)
+			if !open {
+				break
+			}
 			ok := call(worker, MrRpcName, args, nil)
 			if ok == false {
 				fmt.Printf("Schedule: call worker to doTask %v failed, task file is: {%v}, let other work do this work\n", phase, args.File)
@@ -54,6 +59,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	})
 	taskWg.Wait()
 	fmt.Printf("Schedule: %v done\n", phase)
+	defer close(taskChan)
 }
 
 func fetchWorkers(registerChan chan string, sendTask func(worker string))  {
