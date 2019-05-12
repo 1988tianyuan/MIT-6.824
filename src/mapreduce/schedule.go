@@ -20,6 +20,7 @@ const MrRpcName = "Worker.DoTask"
 func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, registerChan chan string) {
 	var nTasks int
 	var nOther int // number of inputs (for reduce) or outputs (for map)
+	isPhaseTerminal := false
 	switch phase {
 	case mapPhase:
 		nTasks = len(mapFiles)
@@ -37,9 +38,8 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		taskChan <- args
 	}
 
-
 	remainedTask := int64(nTasks)
-	go fetchWorkers(registerChan, func(worker string) {
+	go fetchWorkers(&isPhaseTerminal, registerChan, func(worker string) {
 		for remainedTask > 0 {
 			args, open := <- taskChan
 			fmt.Printf("taskChan is open? :{%v}, and args is {%v}\n", open, args)
@@ -59,11 +59,18 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	})
 	taskWg.Wait()
 	fmt.Printf("Schedule: %v done\n", phase)
-	defer close(taskChan)
+	defer func() {
+		isPhaseTerminal = true
+		close(taskChan)
+	}()
 }
 
-func fetchWorkers(registerChan chan string, sendTask func(worker string))  {
+func fetchWorkers(isPhaseTerminal *bool, registerChan chan string, sendTask func(worker string))  {
 	for {
+		if *isPhaseTerminal {
+			fmt.Println("current task phase is terminal, stop to fetch workers")
+			break
+		}
 		worker := <- registerChan
 		fmt.Println("one worker has been found: ", worker)
 		go sendTask(worker)
