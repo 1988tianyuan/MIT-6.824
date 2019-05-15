@@ -1,6 +1,12 @@
 package mapreduce
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+	"sync/atomic"
+)
+
+const MrRpcName = "Worker.DoTask"
 
 //
 // schedule() starts and waits for all tasks in the given phase (mapPhase
@@ -12,23 +18,69 @@ import "fmt"
 // existing registered workers (if any) and new ones as they register.
 //
 func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, registerChan chan string) {
-	var ntasks int
-	var n_other int // number of inputs (for reduce) or outputs (for map)
+	var nTasks int
+	var nOther int // number of inputs (for reduce) or outputs (for map)
+	isPhaseTerminal := false
 	switch phase {
 	case mapPhase:
-		ntasks = len(mapFiles)
-		n_other = nReduce
+		nTasks = len(mapFiles)
+		nOther = nReduce
 	case reducePhase:
-		ntasks = nReduce
-		n_other = len(mapFiles)
+		nTasks = nReduce
+		nOther = len(mapFiles)
+	}
+	fmt.Printf("Schedule: %v %v tasks (%d I/Os)\n", nTasks, phase, nOther)
+	taskWg := sync.WaitGroup{}
+	taskWg.Add(nTasks)
+	taskChan := make(chan DoTaskArgs, nTasks)
+	for i:=0; i<nTasks; i++ {
+		args := makeArgs(jobName, mapFiles, phase, i, nOther, i)
+		taskChan <- args
 	}
 
-	fmt.Printf("Schedule: %v %v tasks (%d I/Os)\n", ntasks, phase, n_other)
-
-	// All ntasks tasks have to be scheduled on workers. Once all tasks
-	// have completed successfully, schedule() should return.
-	//
-	// Your code here (Part III, Part IV).
-	//
+	remainedTask := int64(nTasks)
+	go fetchWorkers(&isPhaseTerminal, registerChan, func(worker string) {
+		for remainedTask > 0 {
+			args, open := <- taskChan
+			fmt.Printf("taskChan is open? :{%v}, and args is {%v}\n", open, args)
+			if !open {
+				break
+			}
+			ok := call(worker, MrRpcName, args, nil)
+			if ok == false {
+				fmt.Printf("Schedule: call worker to doTask %v failed, task file is: {%v}, let other work do this work\n", phase, args.File)
+				taskChan <- args
+			} else {
+				taskWg.Done()
+				atomic.CompareAndSwapInt64(&remainedTask, remainedTask, remainedTask-1)
+			}
+		}
+		fmt.Printf("no task for %s task\n", phase)
+	})
+	taskWg.Wait()
 	fmt.Printf("Schedule: %v done\n", phase)
+	defer func() {
+		isPhaseTerminal = true
+		close(taskChan)
+	}()
+}
+
+func fetchWorkers(isPhaseTerminal *bool, registerChan chan string, sendTask func(worker string))  {
+	for {
+		if *isPhaseTerminal {
+			fmt.Println("current task phase is terminal, stop to fetch workers")
+			break
+		}
+		worker := <- registerChan
+		fmt.Println("one worker has been found: ", worker)
+		go sendTask(worker)
+	}
+}
+
+func makeArgs(jobName string, mapFiles []string, phase jobPhase, taskIndex int, nOther int, index int) DoTaskArgs {
+	args := DoTaskArgs{jobName, "", phase, taskIndex, nOther}
+	if phase == mapPhase {
+		args.File = mapFiles[index]
+	}
+	return args
 }

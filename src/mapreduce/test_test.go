@@ -17,6 +17,7 @@ const (
 	nNumber = 100000
 	nMap    = 20
 	nReduce = 10
+	basePort = 10002
 )
 
 // Create input file with N numbers
@@ -24,7 +25,7 @@ const (
 
 // Split in words
 func MapFunc(file string, value string) (res []KeyValue) {
-	debug("Map %v\n", value)
+	//debug("Map %v\n", value)
 	words := strings.Fields(value)
 	for _, w := range words {
 		kv := KeyValue{w, ""}
@@ -35,9 +36,6 @@ func MapFunc(file string, value string) (res []KeyValue) {
 
 // Just return key
 func ReduceFunc(key string, values []string) string {
-	for _, e := range values {
-		debug("Reduce %s %v\n", key, e)
-	}
 	return ""
 }
 
@@ -129,9 +127,14 @@ func port(suffix string) string {
 	return s
 }
 
+func winPort(addition int) string {
+	return ":" + strconv.Itoa(basePort + addition)
+}
+
 func setup() *Master {
 	files := makeInputs(nMap)
-	master := port("master")
+	//master := port("master")
+	master := winPort(10000)
 	mr := Distributed("test", files, nReduce, master)
 	return mr
 }
@@ -162,7 +165,7 @@ func TestSequentialMany(t *testing.T) {
 func TestParallelBasic(t *testing.T) {
 	mr := setup()
 	for i := 0; i < 2; i++ {
-		go RunWorker(mr.address, port("worker"+strconv.Itoa(i)),
+		go RunWorker(mr.address, winPort(i),
 			MapFunc, ReduceFunc, -1, nil)
 	}
 	mr.Wait()
@@ -175,7 +178,7 @@ func TestParallelCheck(t *testing.T) {
 	mr := setup()
 	parallelism := &Parallelism{}
 	for i := 0; i < 2; i++ {
-		go RunWorker(mr.address, port("worker"+strconv.Itoa(i)),
+		go RunWorker(mr.address, winPort(i),
 			MapFunc, ReduceFunc, -1, parallelism)
 	}
 	mr.Wait()
@@ -194,9 +197,9 @@ func TestParallelCheck(t *testing.T) {
 func TestOneFailure(t *testing.T) {
 	mr := setup()
 	// Start 2 workers that fail after 10 tasks
-	go RunWorker(mr.address, port("worker"+strconv.Itoa(0)),
+	go RunWorker(mr.address, winPort(1),
 		MapFunc, ReduceFunc, 10, nil)
-	go RunWorker(mr.address, port("worker"+strconv.Itoa(1)),
+	go RunWorker(mr.address, winPort(2),
 		MapFunc, ReduceFunc, -1, nil)
 	mr.Wait()
 	check(t, mr.files)
@@ -216,10 +219,10 @@ func TestManyFailures(t *testing.T) {
 			break
 		default:
 			// Start 2 workers each sec. The workers fail after 10 tasks
-			w := port("worker" + strconv.Itoa(i))
+			w := winPort(i)
 			go RunWorker(mr.address, w, MapFunc, ReduceFunc, 10, nil)
 			i++
-			w = port("worker" + strconv.Itoa(i))
+			w = winPort(i)
 			go RunWorker(mr.address, w, MapFunc, ReduceFunc, 10, nil)
 			i++
 			time.Sleep(1 * time.Second)
