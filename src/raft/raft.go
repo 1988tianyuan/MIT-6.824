@@ -23,7 +23,13 @@ import "labrpc"
 // import "bytes"
 // import "labgob"
 
+const (
+	LEADER State = "LEADER"
+	CANDIDATE State = "CANDIDATE"
+	FOLLOWER State = "FOLLOWER"
+)
 
+type State string
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -50,19 +56,19 @@ type Raft struct {
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
-
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-
+	currentTerm int		// latest term server has seen (initialized to 0on first boot, increases monotonically)
+	state State
 }
+
 
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-
-	var term int
-	var isleader bool
+	var term int = rf.currentTerm
+	var isleader bool = rf.state == LEADER
 	// Your code here (2A).
 	return term, isleader
 }
@@ -116,6 +122,10 @@ func (rf *Raft) readPersist(data []byte) {
 //
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
+	Term int	// candidate’s term
+	CandidateId int		// candidate requesting vote
+	LastLogIndex int	// index of candidate’s last log entr
+	LastLogTerm int		// term of candidate’s last log entr
 }
 
 //
@@ -124,6 +134,8 @@ type RequestVoteArgs struct {
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
+	Term int	// currentTerm, for candidate to update itself
+	VoteGranted bool	// true means candidate received vote
 }
 
 //
@@ -131,6 +143,17 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	recvTerm := args.Term
+	currentTerm := rf.currentTerm
+	if recvTerm < currentTerm {
+		reply.VoteGranted = false
+		reply.Term = currentTerm
+	} else {
+		reply.VoteGranted = true
+		if recvTerm > currentTerm {
+			rf.currentTerm = recvTerm
+		}
+	}
 }
 
 //
@@ -222,8 +245,27 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
-
-	// initialize from state persisted before a crash
+	args := &RequestVoteArgs{Term:rf.currentTerm}
+	reply := &RequestVoteReply{}
+	votes := 1
+	for index := range peers {
+		if index == me {
+			continue
+		}
+		ok := rf.sendRequestVote(index, args, reply)
+		if ok {
+			replyTerm := reply.Term
+			if replyTerm <= rf.currentTerm {
+				if reply.VoteGranted {
+					votes++
+				}
+			} else {
+				rf.currentTerm = replyTerm
+				rf.state = FOLLOWER
+				break
+			}
+		}
+	}	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
 
