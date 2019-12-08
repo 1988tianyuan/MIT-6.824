@@ -17,16 +17,21 @@ package raft
 //   in the same server.
 //
 
-import "sync"
+import (
+	"log"
+	"math/rand"
+	"sync"
+	"time"
+)
 import "labrpc"
 
 // import "bytes"
 // import "labgob"
 
 const (
-	LEADER State = "LEADER"
-	CANDIDATE State = "CANDIDATE"
-	FOLLOWER State = "FOLLOWER"
+	LEADER              State = "LEADER"
+	CANDIDATE           State = "CANDIDATE"
+	FOLLOWER            State = "FOLLOWER"
 )
 
 type State string
@@ -48,6 +53,11 @@ type ApplyMsg struct {
 	CommandIndex int
 }
 
+type CurTermAndVotedFor struct {
+	currentTerm          int		// latest term server has seen (initialized to 0on first boot, increases monotonically)
+	votedFor  			 int		// voted peer id during this term
+}
+
 //
 // A Go object implementing a single Raft peer.
 //
@@ -56,21 +66,24 @@ type Raft struct {
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
-	// Your data here (2A, 2B, 2C).
+	// Your data here (2A, 2B, 2C).//todo
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-	currentTerm int		// latest term server has seen (initialized to 0on first boot, increases monotonically)
-	state State
+	state                State
+	isStart              bool
+	lastHeartBeatTime    int64
+	curTermAndVotedFor	CurTermAndVotedFor
+	commitIndex  int
+	lastLogIndex int
+	leaderId int
 }
 
 
 // return currentTerm and whether this server
 // believes it is the leader.
-func (rf *Raft) GetState() (int, bool) {
-	var term int = rf.currentTerm
-	var isleader bool = rf.state == LEADER
-	// Your code here (2A).
-	return term, isleader
+func (raft *Raft) GetState() (int, bool) {
+	// Your code here (2A).	//todo
+	return raft.curTermAndVotedFor.currentTerm, raft.isLeader()
 }
 
 
@@ -79,7 +92,7 @@ func (rf *Raft) GetState() (int, bool) {
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
 //
-func (rf *Raft) persist() {
+func (raft *Raft) persist() {
 	// Your code here (2C).
 	// Example:
 	// w := new(bytes.Buffer)
@@ -94,7 +107,7 @@ func (rf *Raft) persist() {
 //
 // restore previously persisted state.
 //
-func (rf *Raft) readPersist(data []byte) {
+func (raft *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
@@ -121,11 +134,25 @@ func (rf *Raft) readPersist(data []byte) {
 // field names must start with capital letters!
 //
 type RequestVoteArgs struct {
-	// Your data here (2A, 2B).
+	// Your data here (2A, 2B).//todo
 	Term int	// candidate’s term
 	CandidateId int		// candidate requesting vote
 	LastLogIndex int	// index of candidate’s last log entr
 	LastLogTerm int		// term of candidate’s last log entr
+}
+
+type AppendEntriesArgs struct {
+	Term int
+	LeaderId int
+	PrevLogIndex int
+	PrevLogTerm int
+	Entries[] interface{}
+	LeaderCommit int
+}
+
+type AppendEntriesReply struct {
+	Term int
+	Success bool
 }
 
 //
@@ -133,26 +160,86 @@ type RequestVoteArgs struct {
 // field names must start with capital letters!
 //
 type RequestVoteReply struct {
-	// Your data here (2A).
+	// Your data here (2A).//todo
 	Term int	// currentTerm, for candidate to update itself
 	VoteGranted bool	// true means candidate received vote
+}
+
+func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	recvTerm := args.Term
+	currentTerm := &raft.curTermAndVotedFor.currentTerm
+	if *currentTerm > recvTerm {
+		log.Printf("LogAppend: raft的id是:%d, 拒绝这次append，recvTerm是:%d, 而我的term是:%d", raft.me, recvTerm,
+			raft.curTermAndVotedFor.currentTerm)
+		reply.Term = *currentTerm
+		reply.Success = false
+	} else {
+		reply.Success = true
+		raft.lastHeartBeatTime = currentTimeMillis()
+		if raft.isFollower() {
+			raft.leaderId = args.LeaderId
+		}
+		if *currentTerm < recvTerm {
+			*currentTerm = recvTerm
+			if raft.isCandidate() {
+				raft.state = FOLLOWER
+				go raft.doFollowerWaitingJob()
+				return
+			}
+		}
+		if len(args.Entries) > 0 {
+			// 2B, todo
+		}
+	}
 }
 
 //
 // example RequestVote RPC handler.
 //
-func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Your code here (2A, 2B).
+func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
 	recvTerm := args.Term
-	currentTerm := rf.currentTerm
-	if recvTerm < currentTerm {
-		reply.VoteGranted = false
-		reply.Term = currentTerm
-	} else {
+	recvLastLogIndex := args.LastLogIndex
+	votedFor := &raft.curTermAndVotedFor.votedFor
+	currentTerm := &raft.curTermAndVotedFor.currentTerm
+	candidateId := args.CandidateId
+	log.Printf("RequestVote: 当前raft的id是:%d, 当前term是:%d, 给raft-id:%d投票，它的term是:%d",
+		raft.me, *currentTerm, args.CandidateId, args.Term)
+
+	reply.VoteGranted = false
+	reply.Term = *currentTerm
+
+	if recvTerm < *currentTerm {
+		log.Printf("RequestVote: 当前raft的id是:%d, 当前term是:%d, raft-id:%d的term是:%d，投反对票！",
+			raft.me, *currentTerm, args.CandidateId, args.Term)
+		return
+	}
+
+	if recvTerm > *currentTerm && !raft.isFollower() {
+		raft.curTermAndVotedFor.votedFor = 0
+		raft.changeToFollower(recvTerm)
+	}
+
+	//todo: 2B  比较LastLogTerm和lastLogIndex
+	if *votedFor == 0 && recvLastLogIndex >= raft.lastLogIndex {
+		log.Printf("RequestVote: 当前raft的id是:%d, 当前term是:%d, 给raft-id:%d 投赞成票，它的term是:%d",
+					raft.me, *currentTerm, args.CandidateId, args.Term)
+		*votedFor = candidateId
 		reply.VoteGranted = true
-		if recvTerm > currentTerm {
-			rf.currentTerm = recvTerm
-		}
+		reply.Term = recvTerm
+		raft.changeToFollower(recvTerm)
+	}
+}
+
+// need to be called in lock
+func (raft *Raft) changeToFollower(term int)  {
+	if raft.curTermAndVotedFor.currentTerm < term {
+		raft.curTermAndVotedFor.currentTerm = term
+	}
+	if !raft.isFollower() {
+		raft.state = FOLLOWER
+		raft.doFollowerWaitingJob()
 	}
 }
 
@@ -185,9 +272,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
 //
-func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-	return ok
+func (raft *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
+	return raft.peers[server].Call("Raft.RequestVote", args, reply)
+}
+
+func (raft *Raft) sendHeartbeat(leaderId int, server int, reply *AppendEntriesReply) bool {
+	args := AppendEntriesArgs{Term:raft.curTermAndVotedFor.currentTerm, LeaderId:leaderId}	//2B, todo
+	return raft.peers[server].Call("Raft.LogAppend", &args, reply)
 }
 
 
@@ -205,15 +296,14 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 // term. the third return value is true if this server believes it is
 // the leader.
 //
-func (rf *Raft) Start(command interface{}) (int, int, bool) {
+func (raft *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
-	isLeader := true
 
 	// Your code here (2B).
 
 
-	return index, term, isLeader
+	return index, term, raft.isLeader()
 }
 
 //
@@ -222,7 +312,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // in Kill(), but it might be convenient to (for example)
 // turn off debug output from this instance.
 //
-func (rf *Raft) Kill() {
+func (raft *Raft) Kill() {
+	raft.isStart = false
 	// Your code here, if desired.
 }
 
@@ -239,35 +330,148 @@ func (rf *Raft) Kill() {
 //
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
-	rf := &Raft{}
-	rf.peers = peers
-	rf.persister = persister
-	rf.me = me
+	raft := &Raft{}
+	raft.peers = peers
+	raft.persister = persister
+	raft.me = me
+	raft.state = FOLLOWER		// init with FOLLOWER state
+	raft.isStart = true
+	raft.readPersist(persister.ReadRaftState())
 
-	// Your initialization code here (2A, 2B, 2C).
-	args := &RequestVoteArgs{Term:rf.currentTerm}
-	reply := &RequestVoteReply{}
-	votes := 1
-	for index := range peers {
-		if index == me {
-			continue
+	go raft.doFollowerWaitingJob()
+
+	//Your initialization code here (2A, 2B, 2C).//todo
+	return raft
+}
+
+func (raft *Raft) doCandidateJob() {
+	raft.mu.Lock()
+	currentTerm := &raft.curTermAndVotedFor.currentTerm
+	raft.state = CANDIDATE
+	*currentTerm = *currentTerm + 1
+	raft.mu.Unlock()
+	go raft.beginLeaderElection()
+	for raft.isStart && raft.isCandidate() {
+		timeout := makeRandomTimeout(150, 400)
+		time.Sleep(time.Duration(timeout) * time.Millisecond)
+		if raft.isCandidate() {
+			*currentTerm = *currentTerm + 1
+			log.Printf("doCandidateJob: 当前raft的id是：%d,当前term是: %d，选举超时, 超时时间：%d！", raft.me, *currentTerm, timeout)
+			go raft.beginLeaderElection()
 		}
-		ok := rf.sendRequestVote(index, args, reply)
-		if ok {
-			replyTerm := reply.Term
-			if replyTerm <= rf.currentTerm {
+	}
+}
+
+func (raft *Raft) beginLeaderElection() {
+	if raft.isCandidate() {
+		args := &RequestVoteArgs{Term:raft.curTermAndVotedFor.currentTerm, CandidateId:raft.me}
+		reply := &RequestVoteReply{}
+		votes := 1
+		for index := range raft.peers {
+			if index == raft.me {
+				continue
+			}
+			ok := raft.sendRequestVote(index, args, reply)
+			if ok {
+				replyTerm := reply.Term
+				if replyTerm > raft.curTermAndVotedFor.currentTerm {
+					raft.mu.Lock()
+					raft.curTermAndVotedFor.currentTerm = replyTerm
+					raft.state = FOLLOWER
+					raft.mu.Unlock()
+					go raft.doFollowerWaitingJob()
+					return
+				}
 				if reply.VoteGranted {
 					votes++
 				}
-			} else {
-				rf.currentTerm = replyTerm
-				rf.state = FOLLOWER
-				break
 			}
 		}
-	}	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
+		if votes >= (len(raft.peers)/2 + 1) && raft.isCandidate() {
+			raft.state = LEADER
+			log.Printf("选举为Leader: 当前term是%d, 当前的raft的id是%d，得到%d票",
+				raft.curTermAndVotedFor.currentTerm, raft.me, votes)
+			raft.beginLeaderJob()
+		}
+	}
+}
 
+func (raft *Raft) beginLeaderJob() {
+	raft.doLeaderHeartBeatJob()
+}
 
-	return rf
+func (raft *Raft) doLeaderHeartBeatJob()  {
+	for raft.isStart {
+		if raft.isLeader() {
+			for index := range raft.peers {
+				if index == raft.me {
+					continue
+				}
+				reply := &AppendEntriesReply{}
+				if raft.sendHeartbeat(raft.me, index, reply) {
+					replyTerm := reply.Term
+					if !reply.Success && replyTerm > raft.curTermAndVotedFor.currentTerm {
+						raft.curTermAndVotedFor.currentTerm = replyTerm
+						raft.state = FOLLOWER
+						go raft.doFollowerWaitingJob()
+						return
+					}
+				}
+			}
+		} else {
+			return
+		}
+		time.Sleep(time.Duration(100) * time.Millisecond)
+	}
+}
+
+/*
+	just for follower, if heartbeat from leader is timeout, begin leader election
+*/
+func (raft *Raft) doFollowerWaitingJob() {
+	raft.lastHeartBeatTime = currentTimeMillis()
+	flag := true
+	for raft.isStart && flag {
+		timeout := makeRandomTimeout(150, 150)
+		time.Sleep(time.Duration(timeout) * time.Millisecond)
+		flag = !raft.doLeaderExpireJob(timeout)
+	}
+}
+
+func (raft *Raft) doLeaderExpireJob(timeout int64) bool {
+	if raft.isFollower() {
+		currentTimeMillis := currentTimeMillis()
+		log.Printf("FollowerWaitingJob: 当前term是%d, 当前的raft的id是%d, 当前的时间是：%d, timeout是：%d, lastHeartBeatTime是：%d",
+			raft.curTermAndVotedFor.currentTerm, raft.me, currentTimeMillis,
+			timeout, raft.lastHeartBeatTime)
+		// leader heartbeat expired, change state to CANDIDATE and begin leader election
+		if currentTimeMillis > (raft.lastHeartBeatTime + timeout) {
+			log.Printf("FollowerWaitingJob: FOLLOWER等待超时，转换为CANDIDATE, 当前term: %d, raft的id是：%d",
+				raft.curTermAndVotedFor.currentTerm, raft.me)
+			go raft.doCandidateJob()
+			return true
+		}
+		return false
+	}
+	return true
+}
+
+func (raft *Raft) isFollower() bool {
+	return raft.state == FOLLOWER
+}
+
+func (raft *Raft) isLeader() bool {
+	return raft.state == LEADER
+}
+
+func (raft *Raft) isCandidate() bool {
+	return raft.state == CANDIDATE
+}
+
+func makeRandomTimeout(start int64, ran int64) int64 {
+	return rand.Int63n(ran) + start
+}
+
+func currentTimeMillis() int64 {
+	return time.Now().UnixNano() / 1000000
 }
