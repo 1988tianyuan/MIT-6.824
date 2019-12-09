@@ -19,7 +19,6 @@ package raft
 
 import (
 	"log"
-	"math/rand"
 	"sync"
 	"time"
 )
@@ -27,12 +26,6 @@ import "labrpc"
 
 // import "bytes"
 // import "labgob"
-
-const (
-	LEADER              State = "LEADER"
-	CANDIDATE           State = "CANDIDATE"
-	FOLLOWER            State = "FOLLOWER"
-)
 
 type State string
 
@@ -82,7 +75,6 @@ type Raft struct {
 // return currentTerm and whether this server
 // believes it is the leader.
 func (raft *Raft) GetState() (int, bool) {
-	// Your code here (2A).	//todo
 	return raft.curTermAndVotedFor.currentTerm, raft.isLeader()
 }
 
@@ -126,13 +118,6 @@ func (raft *Raft) readPersist(data []byte) {
 	// }
 }
 
-
-
-
-//
-// example RequestVote RPC arguments structure.
-// field names must start with capital letters!
-//
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).//todo
 	Term int	// candidate’s term
@@ -155,10 +140,6 @@ type AppendEntriesReply struct {
 	Success bool
 }
 
-//
-// example RequestVote RPC reply structure.
-// field names must start with capital letters!
-//
 type RequestVoteReply struct {
 	// Your data here (2A).//todo
 	Term int	// currentTerm, for candidate to update itself
@@ -167,11 +148,10 @@ type RequestVoteReply struct {
 
 func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	recvTerm := args.Term
-	currentTerm := &raft.curTermAndVotedFor.currentTerm
-	if *currentTerm > recvTerm {
+	if raft.curTermAndVotedFor.currentTerm > recvTerm {
 		log.Printf("LogAppend: raft的id是:%d, 拒绝这次append，recvTerm是:%d, 而我的term是:%d", raft.me, recvTerm,
 			raft.curTermAndVotedFor.currentTerm)
-		reply.Term = *currentTerm
+		reply.Term = raft.curTermAndVotedFor.currentTerm
 		reply.Success = false
 	} else {
 		reply.Success = true
@@ -179,13 +159,8 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 		if raft.isFollower() {
 			raft.leaderId = args.LeaderId
 		}
-		if *currentTerm < recvTerm {
-			*currentTerm = recvTerm
-			if raft.isCandidate() {
-				raft.state = FOLLOWER
-				go raft.doFollowerWaitingJob()
-				return
-			}
+		if raft.curTermAndVotedFor.currentTerm < recvTerm {
+			raft.changeToFollower(recvTerm)
 		}
 		if len(args.Entries) > 0 {
 			// 2B, todo
@@ -199,79 +174,57 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
+	changedToFollower := false
 	recvTerm := args.Term
 	recvLastLogIndex := args.LastLogIndex
-	votedFor := &raft.curTermAndVotedFor.votedFor
-	currentTerm := &raft.curTermAndVotedFor.currentTerm
 	candidateId := args.CandidateId
-	log.Printf("RequestVote: 当前raft的id是:%d, 当前term是:%d, 给raft-id:%d投票，它的term是:%d",
-		raft.me, *currentTerm, args.CandidateId, args.Term)
+	log.Printf("RequestVote: 当前raft的id是:%d, 当前term是:%d, 当前votedFor是%v, 给raft-id:%d投票，它的term是:%d",
+		raft.me, raft.curTermAndVotedFor.currentTerm, raft.curTermAndVotedFor.votedFor, args.CandidateId, args.Term)
 
 	reply.VoteGranted = false
-	reply.Term = *currentTerm
+	reply.Term = raft.curTermAndVotedFor.currentTerm
 
-	if recvTerm < *currentTerm {
+	if recvTerm < raft.curTermAndVotedFor.currentTerm {
 		log.Printf("RequestVote: 当前raft的id是:%d, 当前term是:%d, raft-id:%d的term是:%d，投反对票！",
-			raft.me, *currentTerm, args.CandidateId, args.Term)
+			raft.me, raft.curTermAndVotedFor.currentTerm, args.CandidateId, args.Term)
 		return
 	}
 
-	if recvTerm > *currentTerm && !raft.isFollower() {
-		raft.curTermAndVotedFor.votedFor = 0
-		raft.changeToFollower(recvTerm)
+	if recvTerm > raft.curTermAndVotedFor.currentTerm {
+		raft.curTermAndVotedFor = CurTermAndVotedFor{currentTerm:recvTerm, votedFor:-1}
+		if !raft.isFollower() {
+			raft.state = FOLLOWER
+			changedToFollower = true
+		}
 	}
 
 	//todo: 2B  比较LastLogTerm和lastLogIndex
-	if *votedFor == 0 && recvLastLogIndex >= raft.lastLogIndex {
-		log.Printf("RequestVote: 当前raft的id是:%d, 当前term是:%d, 给raft-id:%d 投赞成票，它的term是:%d",
-					raft.me, *currentTerm, args.CandidateId, args.Term)
-		*votedFor = candidateId
+	if raft.curTermAndVotedFor.votedFor == -1 && recvLastLogIndex >= raft.lastLogIndex {
+		log.Printf("RequestVote: 当前raft的id是:%d, 当前term是:%d，给raft-id:%d 投赞成票，它的term是:%d",
+					raft.me, raft.curTermAndVotedFor.currentTerm, args.CandidateId, args.Term)
+		raft.curTermAndVotedFor.votedFor = candidateId
 		reply.VoteGranted = true
 		reply.Term = recvTerm
-		raft.changeToFollower(recvTerm)
+	}
+
+	if changedToFollower {
+		go raft.doFollowerJob()
 	}
 }
 
 // need to be called in lock
 func (raft *Raft) changeToFollower(term int)  {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
 	if raft.curTermAndVotedFor.currentTerm < term {
-		raft.curTermAndVotedFor.currentTerm = term
+		raft.curTermAndVotedFor = CurTermAndVotedFor{currentTerm:term, votedFor:0}
 	}
 	if !raft.isFollower() {
 		raft.state = FOLLOWER
-		raft.doFollowerWaitingJob()
+		go raft.doFollowerJob()
 	}
 }
 
-//
-// example code to send a RequestVote RPC to a server.
-// server is the index of the target server in rf.peers[].
-// expects RPC arguments in args.
-// fills in *reply with RPC reply, so caller should
-// pass &reply.
-// the types of the args and reply passed to Call() must be
-// the same as the types of the arguments declared in the
-// handler function (including whether they are pointers).
-//
-// The labrpc package simulates a lossy network, in which servers
-// may be unreachable, and in which requests and replies may be lost.
-// Call() sends a request and waits for a reply. If a reply arrives
-// within a timeout interval, Call() returns true; otherwise
-// Call() returns false. Thus Call() may not return for a while.
-// A false return can be caused by a dead server, a live server that
-// can't be reached, a lost request, or a lost reply.
-//
-// Call() is guaranteed to return (perhaps after a delay) *except* if the
-// handler function on the server side does not return.  Thus there
-// is no need to implement your own timeouts around Call().
-//
-// look at the comments in ../labrpc/labrpc.go for more details.
-//
-// if you're having trouble getting RPC to work, check that you've
-// capitalized all field names in structs passed over RPC, and
-// that the caller passes the address of the reply struct with &, not
-// the struct itself.
-//
 func (raft *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	return raft.peers[server].Call("Raft.RequestVote", args, reply)
 }
@@ -338,7 +291,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	raft.isStart = true
 	raft.readPersist(persister.ReadRaftState())
 
-	go raft.doFollowerWaitingJob()
+	go raft.doFollowerJob()
 
 	//Your initialization code here (2A, 2B, 2C).//todo
 	return raft
@@ -346,18 +299,22 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 func (raft *Raft) doCandidateJob() {
 	raft.mu.Lock()
-	currentTerm := &raft.curTermAndVotedFor.currentTerm
 	raft.state = CANDIDATE
-	*currentTerm = *currentTerm + 1
-	raft.mu.Unlock()
+	currentTerm := raft.curTermAndVotedFor.currentTerm
+	raft.curTermAndVotedFor = CurTermAndVotedFor{currentTerm:currentTerm + 1, votedFor:raft.me}
 	go raft.beginLeaderElection()
+	raft.mu.Unlock()
 	for raft.isStart && raft.isCandidate() {
-		timeout := makeRandomTimeout(150, 400)
+		timeout := makeRandomTimeout(150, CANDIDATE_TIMEOUT_RANGE)
 		time.Sleep(time.Duration(timeout) * time.Millisecond)
 		if raft.isCandidate() {
-			*currentTerm = *currentTerm + 1
-			log.Printf("doCandidateJob: 当前raft的id是：%d,当前term是: %d，选举超时, 超时时间：%d！", raft.me, *currentTerm, timeout)
+			raft.mu.Lock()
+			log.Printf("doCandidateJob: 当前raft的id是：%d,当前term是: %d，选举超时, 超时时间：%d！", raft.me,
+				raft.curTermAndVotedFor.currentTerm, timeout)
+			currentTerm1 := raft.curTermAndVotedFor.currentTerm
+			raft.curTermAndVotedFor = CurTermAndVotedFor{currentTerm:currentTerm1 + 1, votedFor:raft.me}
 			go raft.beginLeaderElection()
+			raft.mu.Unlock()
 		}
 	}
 }
@@ -365,33 +322,34 @@ func (raft *Raft) doCandidateJob() {
 func (raft *Raft) beginLeaderElection() {
 	if raft.isCandidate() {
 		args := &RequestVoteArgs{Term:raft.curTermAndVotedFor.currentTerm, CandidateId:raft.me}
-		reply := &RequestVoteReply{}
+		var reply *RequestVoteReply
 		votes := 1
-		for index := range raft.peers {
-			if index == raft.me {
+		for server := range raft.peers {
+			if server == raft.me {
 				continue
 			}
-			ok := raft.sendRequestVote(index, args, reply)
+			reply = &RequestVoteReply{}
+			ok := raft.sendRequestVote(server, args, reply)
 			if ok {
 				replyTerm := reply.Term
 				if replyTerm > raft.curTermAndVotedFor.currentTerm {
-					raft.mu.Lock()
-					raft.curTermAndVotedFor.currentTerm = replyTerm
-					raft.state = FOLLOWER
-					raft.mu.Unlock()
-					go raft.doFollowerWaitingJob()
+					raft.changeToFollower(replyTerm)
 					return
 				}
 				if reply.VoteGranted {
+					log.Printf("beginLeaderElection: 当前term是%d, 当前的raft的id是%d，从raft:%d 处获得1票",
+						raft.curTermAndVotedFor.currentTerm, raft.me, server)
 					votes++
 				}
 			}
 		}
 		if votes >= (len(raft.peers)/2 + 1) && raft.isCandidate() {
+			raft.mu.Lock()
 			raft.state = LEADER
 			log.Printf("选举为Leader: 当前term是%d, 当前的raft的id是%d，得到%d票",
 				raft.curTermAndVotedFor.currentTerm, raft.me, votes)
-			raft.beginLeaderJob()
+			raft.mu.Unlock()
+			go raft.beginLeaderJob()
 		}
 	}
 }
@@ -411,9 +369,11 @@ func (raft *Raft) doLeaderHeartBeatJob()  {
 				if raft.sendHeartbeat(raft.me, index, reply) {
 					replyTerm := reply.Term
 					if !reply.Success && replyTerm > raft.curTermAndVotedFor.currentTerm {
-						raft.curTermAndVotedFor.currentTerm = replyTerm
+						raft.mu.Lock()
 						raft.state = FOLLOWER
-						go raft.doFollowerWaitingJob()
+						raft.curTermAndVotedFor = CurTermAndVotedFor{currentTerm:replyTerm, votedFor:-1}
+						raft.mu.Unlock()
+						go raft.doFollowerJob()
 						return
 					}
 				}
@@ -428,50 +388,19 @@ func (raft *Raft) doLeaderHeartBeatJob()  {
 /*
 	just for follower, if heartbeat from leader is timeout, begin leader election
 */
-func (raft *Raft) doFollowerWaitingJob() {
+func (raft *Raft) doFollowerJob() {
 	raft.lastHeartBeatTime = currentTimeMillis()
-	flag := true
-	for raft.isStart && flag {
+	for raft.isStart {
 		timeout := makeRandomTimeout(150, 150)
 		time.Sleep(time.Duration(timeout) * time.Millisecond)
-		flag = !raft.doLeaderExpireJob(timeout)
-	}
-}
-
-func (raft *Raft) doLeaderExpireJob(timeout int64) bool {
-	if raft.isFollower() {
-		currentTimeMillis := currentTimeMillis()
-		log.Printf("FollowerWaitingJob: 当前term是%d, 当前的raft的id是%d, 当前的时间是：%d, timeout是：%d, lastHeartBeatTime是：%d",
-			raft.curTermAndVotedFor.currentTerm, raft.me, currentTimeMillis,
-			timeout, raft.lastHeartBeatTime)
-		// leader heartbeat expired, change state to CANDIDATE and begin leader election
-		if currentTimeMillis > (raft.lastHeartBeatTime + timeout) {
-			log.Printf("FollowerWaitingJob: FOLLOWER等待超时，转换为CANDIDATE, 当前term: %d, raft的id是：%d",
-				raft.curTermAndVotedFor.currentTerm, raft.me)
-			go raft.doCandidateJob()
-			return true
+		if raft.isFollower() {
+			current := currentTimeMillis()
+			// leader heartbeat expired, change state to CANDIDATE and begin leader election
+			if current > (raft.lastHeartBeatTime + timeout) {
+				raft.printLog("FollowerWaitingJob", "FOLLOWER等待超时，转换为CANDIDATE")
+				go raft.doCandidateJob()
+				break
+			}
 		}
-		return false
 	}
-	return true
-}
-
-func (raft *Raft) isFollower() bool {
-	return raft.state == FOLLOWER
-}
-
-func (raft *Raft) isLeader() bool {
-	return raft.state == LEADER
-}
-
-func (raft *Raft) isCandidate() bool {
-	return raft.state == CANDIDATE
-}
-
-func makeRandomTimeout(start int64, ran int64) int64 {
-	return rand.Int63n(ran) + start
-}
-
-func currentTimeMillis() int64 {
-	return time.Now().UnixNano() / 1000000
 }
