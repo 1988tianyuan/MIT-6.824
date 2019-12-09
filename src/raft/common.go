@@ -13,6 +13,10 @@ const (
 	CANDIDATE_TIMEOUT_RANGE   int64 = 400
 )
 
+func (raft *Raft) Kill() {
+	raft.isStart = false
+}
+
 func (raft *Raft) isFollower() bool {
 	return raft.state == FOLLOWER
 }
