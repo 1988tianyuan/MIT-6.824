@@ -25,8 +25,8 @@ func (raft *Raft) isCandidate() bool {
 	return raft.state == CANDIDATE
 }
 
-func makeRandomTimeout(start int64, ran int64) int64 {
-	return rand.Int63n(ran) + start
+func makeRandomTimeout(start int64, ran int64) time.Duration {
+	return time.Duration(rand.Int63n(ran) + start) * time.Millisecond
 }
 
 func currentTimeMillis() int64 {
