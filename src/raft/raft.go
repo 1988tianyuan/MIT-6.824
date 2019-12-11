@@ -126,10 +126,7 @@ func (raft *Raft) beginLeaderElection(duration time.Duration) {
 				}
 				if votes >= threshold {
 					raft.mu.Lock()
-					raft.state = LEADER
-					log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票",
-						raft.curTermAndVotedFor.currentTerm, raft.me, votes)
-					go raft.doLeaderJob()
+					raft.changeToLeader(votes)
 					raft.mu.Unlock()
 					return
 				}
@@ -138,6 +135,13 @@ func (raft *Raft) beginLeaderElection(duration time.Duration) {
 			}
 		}
 	}
+}
+
+func (raft *Raft) changeToLeader(votes int)  {
+	raft.state = LEADER
+	log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票",
+		raft.curTermAndVotedFor.currentTerm, raft.me, votes)
+	go raft.doLeaderJob()
 }
 
 /*
@@ -161,13 +165,14 @@ func (raft *Raft) stepDown(term int)  {
 */
 func (raft *Raft) doHeartbeatJob()  {
 	for raft.isStart && raft.isLeader() {
+		// send heartbeat to each follower
 		for index := range raft.peers {
 			if index == raft.me {
 				continue
 			}
 			go raft.sendHeartbeat(index)
 		}
-		time.Sleep(time.Duration(100) * time.Millisecond)
+		time.Sleep(HEARTBEAT_PERIOD)
 	}
 }
 
