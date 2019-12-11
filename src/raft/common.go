@@ -11,7 +11,12 @@ const (
 	CANDIDATE           State = "CANDIDATE"
 	FOLLOWER            State = "FOLLOWER"
 	CANDIDATE_TIMEOUT_RANGE   int64 = 400
+	HEARTBEAT_PERIOD   time.Duration = time.Duration(100) * time.Millisecond
 )
+
+func (raft *Raft) Kill() {
+	raft.isStart = false
+}
 
 func (raft *Raft) isFollower() bool {
 	return raft.state == FOLLOWER
