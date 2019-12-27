@@ -20,8 +20,13 @@ type Raft struct {
 	lastHeartBeatTime    int64
 	curTermAndVotedFor	CurTermAndVotedFor
 	commitIndex  int
+	lastApplied  int
 	lastLogIndex int
-	leaderId int
+	lastLogTerm int
+	leaderId 	 int
+	matchIndex []int
+	nextIndex  []int
+	logs	   []LogItem
 }
 
 func (raft *Raft) GetState() (int, bool) {
@@ -42,12 +47,12 @@ type RequestVoteArgs struct {
 }
 
 type AppendEntriesArgs struct {
-	Term int
-	LeaderId int
+	Term         int
+	LeaderId     int
 	PrevLogIndex int
-	PrevLogTerm int
-	Entries[] interface{}
-	LeaderCommit int
+	PrevLogTerm  int
+	Entries      [] interface{}
+	CommitIndex  int
 }
 
 type AppendEntriesReply struct {
@@ -56,11 +61,16 @@ type AppendEntriesReply struct {
 }
 
 type RequestVoteReply struct {
-	// Your data here (2A).//todo
 	Term int	// currentTerm, for candidate to update itself
 	VoteGranted bool	// true means candidate received vote
 	Server int
 	HasStepDown bool
+}
+
+type LogItem struct {
+	Term int
+	Index int
+	command interface{}
 }
 
 //

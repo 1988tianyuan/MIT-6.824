@@ -40,10 +40,10 @@ import "labrpc"
 // the leader.
 //
 func (raft *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
+	index := len(raft.logs)
+	term := raft.curTermAndVotedFor.currentTerm
 
-	//todo: Your code here (2B).
+
 	return index, term, raft.isLeader()
 }
 
@@ -61,6 +61,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	//Your initialization code here (2A, 2B, 2C).//todo
 	return raft
+}
+
+func (raft *Raft) initNextIndex()  {
+	raft.nextIndex = make([]int, len(raft.peers))
+	for server := range raft.nextIndex {
+		raft.nextIndex[server] = len(raft.logs)
+	}
 }
 
 func (raft *Raft) doCandidateJob() {
@@ -100,7 +107,7 @@ func (raft *Raft) sendRequestVote(server int, args *RequestVoteArgs, replyChan c
 	}
 }
 
-func (raft *Raft) beginLeaderElection(duration time.Duration) {
+func (raft *Raft) beginLeaderElection(timeout time.Duration) {
 	replyChan := make(chan RequestVoteReply, len(raft.peers) - 1)  // channel for receive async vote request
 	if raft.isCandidate() {
 		args := &RequestVoteArgs{Term:raft.curTermAndVotedFor.currentTerm, CandidateId:raft.me}
@@ -111,7 +118,7 @@ func (raft *Raft) beginLeaderElection(duration time.Duration) {
 			}
 			go raft.sendRequestVote(server, args, replyChan)
 		}
-		timer := time.After(duration)
+		timer := time.After(timeout)
 		threshold := len(raft.peers)/2 + 1
 		for raft.isCandidate() {
 			select {
@@ -148,6 +155,7 @@ func (raft *Raft) changeToLeader(votes int)  {
 	begin LEADER's job
 */
 func (raft *Raft) doLeaderJob()  {
+	raft.initNextIndex()
 	raft.doHeartbeatJob()
 }
 
@@ -194,7 +202,7 @@ func (raft *Raft) doFollowerJob() {
 	raft.lastHeartBeatTime = currentTimeMillis()
 	for raft.isStart {
 		timeout := makeRandomTimeout(150, 150)
-		time.Sleep(timeout)
+		time.Sleep(makeRandomTimeout(100, 100))
 		if raft.isFollower() {
 			current := currentTimeMillis()
 			// leader heartbeat expired, change state to CANDIDATE and begin leader election
