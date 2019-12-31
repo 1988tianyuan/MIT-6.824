@@ -5,9 +5,7 @@ import "log"
 func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
-	raft.lastHeartBeatTime = currentTimeMillis()	// refresh the follower's election timeout
 	recvTerm := args.Term
-	recvLastLogIndex := args.LastLogIndex
 	candidateId := args.CandidateId
 	log.Printf("RequestVote==> term: %d, raft-id: %d, 当前votedFor是%v, 给raft-id:%d投票，它的term是:%d",
 		raft.curTermAndVotedFor.currentTerm, raft.me, raft.curTermAndVotedFor.votedFor, args.CandidateId, args.Term)
@@ -26,8 +24,9 @@ func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		raft.stepDown(recvTerm)
 	}
 
-	//todo: 2B  比较LastLogTerm和lastLogIndex
-	if raft.curTermAndVotedFor.votedFor == -1 && recvLastLogIndex >= raft.lastLogIndex {
+	if raft.shouldGrant(args) {
+		// refresh the follower's election timeout
+		raft.lastHeartBeatTime = currentTimeMillis()
 		// if haven't voted in currentTerm, do voteGranted and set votedFor as the candidateId
 		log.Printf("RequestVote==> term: %d, raft-id: %d, 给raft-id:%d 投赞成票，它的term是:%d",
 			raft.curTermAndVotedFor.currentTerm, raft.me, args.CandidateId, args.Term)
@@ -37,26 +36,79 @@ func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 }
 
+func (raft *Raft) shouldGrant(args *RequestVoteArgs) bool {
+	recvLastLogIndex := args.LastLogIndex
+	recvLastLogTerm := args.LastLogTerm
+	return raft.curTermAndVotedFor.votedFor == -1 &&
+		recvLastLogTerm >= raft.lastLogTerm &&
+		recvLastLogIndex >= raft.lastLogIndex
+}
+
 func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	recvTerm := args.Term
+	shouldAppend, matchIndex := raft.shouldAppendEntries(args)
 	if raft.curTermAndVotedFor.currentTerm > recvTerm {
 		log.Printf("LogAppend: raft的id是:%d, 拒绝这次append，recvTerm是:%d, 而我的term是:%d", raft.me, recvTerm,
 			raft.curTermAndVotedFor.currentTerm)
 		reply.Term = raft.curTermAndVotedFor.currentTerm
 		reply.Success = false
-	} else {
+	} else if shouldAppend {
 		reply.Success = true
 		raft.lastHeartBeatTime = currentTimeMillis()
 		raft.mu.Lock()
 		defer raft.mu.Unlock()
-		if raft.isFollower() {
+		if raft.isFollower() && raft.leaderId != args.LeaderId {
 			raft.leaderId = args.LeaderId
 		}
 		if raft.curTermAndVotedFor.currentTerm < recvTerm {
 			raft.stepDown(recvTerm)
 		}
+		if raft.commitIndex != args.CommitIndex {
+			raft.commitIndex = args.CommitIndex
+		}
 		if len(args.Entries) > 0 {
-			// 2B, todo
+			raft.appendEntries(args.Entries, matchIndex)
+		}
+	} else {
+		reply.Success = false
+	}
+}
+
+func (raft *Raft) appendEntries(entries []interface{}, matchIndex int) {
+	log.Printf("LogAppend: term: %d, raft-id: %d, 开始append，当前matchIndex是%d",
+		raft.curTermAndVotedFor.currentTerm, raft.me, matchIndex)
+	//raft.mu.Lock()
+	currentIndex := matchIndex + 1
+	term := raft.curTermAndVotedFor.currentTerm
+	//defer raft.mu.Unlock()
+	for _, entry := range entries {
+		item := ApplyMsg{CommandIndex:currentIndex, Term:term, Command:entry}
+		if currentIndex < len(raft.logs) {
+			raft.logs[currentIndex] = item
+		} else {
+			raft.logs = append(raft.logs, item)
+		}
+		currentIndex++
+	}
+	raft.lastLogIndex = currentIndex
+	raft.lastLogTerm = term
+}
+
+func (raft *Raft) shouldAppendEntries(args *AppendEntriesArgs) (bool,int) {
+	logs := raft.logs
+	index := len(logs) - 1
+	if index < 0 {
+		return true, 0
+	} else {
+		for index >= args.PrevLogIndex {
+			term := logs[index].Term
+			if term != args.PrevLogTerm {
+				index--
+				continue
+			} else {
+				return true, index
+			}
 		}
 	}
+	return false, 0
 }
