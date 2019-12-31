@@ -42,8 +42,12 @@ import "labrpc"
 func (raft *Raft) Start(command interface{}) (int, int, bool) {
 	index := len(raft.logs)
 	term := raft.curTermAndVotedFor.currentTerm
-
-
+	if raft.isLeader() {
+		raft.logs = append(raft.logs, ApplyMsg{Term: term, CommandIndex: index, Command: command})
+		raft.lastLogIndex = index
+		raft.lastLogTerm = term
+		raft.syncLogsToFollowers()
+	}
 	return index, term, raft.isLeader()
 }
 
@@ -56,143 +60,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	raft.state = FOLLOWER		// init with FOLLOWER state
 	raft.isStart = true
 	raft.readPersist(persister.ReadRaftState())
+	raft.applyCh = applyCh
+	raft.logs = make([] ApplyMsg, 0)
 
 	go raft.doFollowerJob()
 
 	//Your initialization code here (2A, 2B, 2C).//todo
 	return raft
-}
-
-func (raft *Raft) initNextIndex()  {
-	raft.nextIndex = make([]int, len(raft.peers))
-	for server := range raft.nextIndex {
-		raft.nextIndex[server] = len(raft.logs)
-	}
-}
-
-func (raft *Raft) doCandidateJob() {
-	for raft.isStart {
-		raft.mu.Lock()
-		raft.state = CANDIDATE
-		currentTerm := raft.curTermAndVotedFor.currentTerm
-		raft.curTermAndVotedFor =
-			CurTermAndVotedFor{currentTerm:currentTerm + 1, votedFor:raft.me}	// increment term and vote for self
-		timeout := makeRandomTimeout(150, CANDIDATE_TIMEOUT_RANGE)		// random election timeout
-		go raft.beginLeaderElection(timeout)
-		raft.mu.Unlock()
-		time.Sleep(timeout)
-		if raft.isCandidate() {		// election timeout
-			log.Printf("DoCandidateJob==> term: %d, raft-id: %d, 选举超时, 重新开始选举",
-				raft.curTermAndVotedFor.currentTerm, raft.me)
-		} else {
-			break
-		}
-	}
-}
-
-func (raft *Raft) sendRequestVote(server int, args *RequestVoteArgs, replyChan chan RequestVoteReply) {
-	reply := RequestVoteReply{}
-	reply.HasStepDown = false
-	reply.Server = server
-	ok := raft.peers[server].Call("Raft.RequestVote", args, &reply)
-	if ok {
-		replyTerm := reply.Term
-		if replyTerm > raft.curTermAndVotedFor.currentTerm {
-			raft.mu.Lock()
-			defer raft.mu.Unlock()
-			raft.stepDown(replyTerm)
-			reply.HasStepDown = true
-		}
-		replyChan <- reply
-	}
-}
-
-func (raft *Raft) beginLeaderElection(timeout time.Duration) {
-	replyChan := make(chan RequestVoteReply, len(raft.peers) - 1)  // channel for receive async vote request
-	if raft.isCandidate() {
-		args := &RequestVoteArgs{Term:raft.curTermAndVotedFor.currentTerm, CandidateId:raft.me}
-		votes := 1
-		for server := range raft.peers {
-			if server == raft.me {
-				continue
-			}
-			go raft.sendRequestVote(server, args, replyChan)
-		}
-		timer := time.After(timeout)
-		threshold := len(raft.peers)/2 + 1
-		for raft.isCandidate() {
-			select {
-			case reply := <- replyChan:
-				if reply.HasStepDown {
-					return
-				}
-				if reply.VoteGranted {
-					log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 从raft:%d 处获得1票",
-						raft.curTermAndVotedFor.currentTerm, raft.me, reply.Server)
-					votes++
-				}
-				if votes >= threshold {
-					raft.mu.Lock()
-					raft.changeToLeader(votes)
-					raft.mu.Unlock()
-					return
-				}
-			case <-timer:
-				return
-			}
-		}
-	}
-}
-
-func (raft *Raft) changeToLeader(votes int)  {
-	raft.state = LEADER
-	log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票",
-		raft.curTermAndVotedFor.currentTerm, raft.me, votes)
-	go raft.doLeaderJob()
-}
-
-/*
-	begin LEADER's job
-*/
-func (raft *Raft) doLeaderJob()  {
-	raft.initNextIndex()
-	raft.doHeartbeatJob()
-}
-
-// need to be called in lock, and the term should be bigger than raft's currentTerm
-func (raft *Raft) stepDown(term int)  {
-	raft.curTermAndVotedFor = CurTermAndVotedFor{currentTerm:term, votedFor:-1}
-	if !raft.isFollower() {
-		raft.state = FOLLOWER
-		go raft.doFollowerJob()
-	}
-}
-
-/*
-	for LEADER sending heartbeat to each FOLLOWER
-*/
-func (raft *Raft) doHeartbeatJob()  {
-	for raft.isStart && raft.isLeader() {
-		// send heartbeat to each follower
-		for index := range raft.peers {
-			if index == raft.me {
-				continue
-			}
-			go raft.sendHeartbeat(index)
-		}
-		time.Sleep(HEARTBEAT_PERIOD)
-	}
-}
-
-func (raft *Raft) sendHeartbeat(follower int) {
-	args := AppendEntriesArgs{Term:raft.curTermAndVotedFor.currentTerm, LeaderId:raft.me}	//2B, todo
-	reply := AppendEntriesReply{}
-	ok := raft.peers[follower].Call("Raft.LogAppend", &args, &reply)
-	raft.mu.Lock()
-	if !ok && reply.Term > raft.curTermAndVotedFor.currentTerm {
-		raft.stepDown(reply.Term)
-	}
-	defer raft.mu.Unlock()
 }
 
 /*

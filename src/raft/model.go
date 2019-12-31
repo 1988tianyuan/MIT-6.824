@@ -15,18 +15,19 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).//todo
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-	state                State
-	isStart              bool
-	lastHeartBeatTime    int64
-	curTermAndVotedFor	CurTermAndVotedFor
-	commitIndex  int
-	lastApplied  int
-	lastLogIndex int
-	lastLogTerm int
-	leaderId 	 int
-	matchIndex []int
-	nextIndex  []int
-	logs	   []LogItem
+	state              State
+	isStart            bool
+	lastHeartBeatTime  int64
+	curTermAndVotedFor CurTermAndVotedFor
+	commitIndex        int
+	lastApplied        int
+	lastLogIndex       int
+	lastLogTerm        int
+	leaderId           int
+	matchIndex         []int
+	nextIndex          []int
+	logs               []ApplyMsg
+	applyCh            chan ApplyMsg
 }
 
 func (raft *Raft) GetState() (int, bool) {
@@ -67,12 +68,6 @@ type RequestVoteReply struct {
 	HasStepDown bool
 }
 
-type LogItem struct {
-	Term int
-	Index int
-	command interface{}
-}
-
 //
 // as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or
@@ -88,4 +83,5 @@ type ApplyMsg struct {
 	CommandValid bool
 	Command      interface{}
 	CommandIndex int
+	Term 		 int
 }
