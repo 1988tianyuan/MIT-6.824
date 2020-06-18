@@ -15,13 +15,23 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).//todo
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-	state                State
-	isStart              bool
-	lastHeartBeatTime    int64
-	curTermAndVotedFor	CurTermAndVotedFor
-	commitIndex  int
-	lastLogIndex int
-	leaderId int
+	state              State
+	isStart            bool
+	lastHeartBeatTime  int64
+	curTermAndVotedFor CurTermAndVotedFor
+	commitIndex        int
+	lastLogIndex       int
+	lastLogTerm        int
+	leaderId           int
+	LogEntries         []*Entry
+	applyCh            chan ApplyMsg
+	followerSyncStates []FollowerSyncState
+}
+
+type FollowerSyncState struct {
+	PrevLogIndex int
+	PrevLogTerm  int
+	PeerId       int
 }
 
 func (raft *Raft) GetState() (int, bool) {
@@ -29,37 +39,43 @@ func (raft *Raft) GetState() (int, bool) {
 }
 
 type CurTermAndVotedFor struct {
-	currentTerm          int		// latest term server has seen (initialized to 0on first boot, increases monotonically)
-	votedFor  			 int		// voted peer id during this term
+	currentTerm int // latest term server has seen (initialized to 0on first boot, increases monotonically)
+	votedFor    int // voted peer id during this term
 }
 
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).//todo
-	Term int	// candidate’s term
-	CandidateId int		// candidate requesting vote
-	LastLogIndex int	// index of candidate’s last log entr
-	LastLogTerm int		// term of candidate’s last log entr
+	Term         int // candidate’s term
+	CandidateId  int // candidate requesting vote
+	LastLogIndex int // index of candidate’s last log entr
+	LastLogTerm  int // term of candidate’s last log entr
 }
 
 type AppendEntriesArgs struct {
-	Term int
-	LeaderId int
+	Term         int
+	LeaderId     int
 	PrevLogIndex int
-	PrevLogTerm int
-	Entries[] interface{}
+	PrevLogTerm  int
+	Commands     []interface{}
 	LeaderCommit int
 }
 
 type AppendEntriesReply struct {
-	Term int
+	Term    int
 	Success bool
+}
+
+type Entry struct {
+	Command interface{}
+	Term    int
+	Index   int
 }
 
 type RequestVoteReply struct {
 	// Your data here (2A).//todo
-	Term int	// currentTerm, for candidate to update itself
-	VoteGranted bool	// true means candidate received vote
-	Server int
+	Term        int  // currentTerm, for candidate to update itself
+	VoteGranted bool // true means candidate received vote
+	Server      int
 	HasStepDown bool
 }
 
