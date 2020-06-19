@@ -17,10 +17,6 @@ package raft
 //   in the same server.
 //
 
-import (
-	"log"
-	"time"
-)
 import "labrpc"
 // import "bytes"
 // import "labgob"
@@ -46,13 +42,12 @@ func (raft *Raft) Start(command interface{}) (int, int, bool) {
 		raft.logs = append(raft.logs, ApplyMsg{Term: term, CommandIndex: index, Command: command})
 		raft.lastLogIndex = index
 		raft.lastLogTerm = term
-		raft.syncLogsToFollowers()
+		go raft.syncLogsToFollowers(makeRandomTimeout(600, 150))
 	}
 	return index, term, raft.isLeader()
 }
 
-func Make(peers []*labrpc.ClientEnd, me int,
-	persister *Persister, applyCh chan ApplyMsg) *Raft {
+func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg) *Raft {
 	raft := &Raft{}
 	raft.peers = peers
 	raft.persister = persister
@@ -62,70 +57,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	raft.readPersist(persister.ReadRaftState())
 	raft.applyCh = applyCh
 	raft.logs = make([] ApplyMsg, 0)
+	raft.logs = append(raft.logs, ApplyMsg{})		// init empty log for index=0
 
 	go raft.doFollowerJob()
 
 	//Your initialization code here (2A, 2B, 2C).//todo
 	return raft
-}
-
-/*
-	just for follower, if heartbeat from leader is timeout, begin leader election
-*/
-func (raft *Raft) doFollowerJob() {
-	raft.lastHeartBeatTime = currentTimeMillis()
-	for raft.isStart {
-		timeout := makeRandomTimeout(150, 150)
-		time.Sleep(makeRandomTimeout(100, 100))
-		if raft.isFollower() {
-			current := currentTimeMillis()
-			// leader heartbeat expired, change state to CANDIDATE and begin leader election
-			if current > (raft.lastHeartBeatTime + timeout.Nanoseconds()/1000000) {
-				log.Printf("DoFollowerJob==> term: %d, raft-id: %d, FOLLOWER等待超时，转换为CANDIDATE",
-				raft.curTermAndVotedFor.currentTerm, raft.me)
-				go raft.doCandidateJob()
-				break
-			}
-		}
-	}
-}
-
-
-//
-// save Raft's persistent state to stable storage,
-// where it can later be retrieved after a crash and restart.
-// see paper's Figure 2 for a description of what should be persistent.
-//
-func (raft *Raft) persist() {
-	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
-}
-
-
-//
-// restore previously persisted state.
-//
-func (raft *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
-		return
-	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
 }

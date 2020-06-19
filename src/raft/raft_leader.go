@@ -23,21 +23,63 @@ func (raft *Raft) changeToLeader(votes int)  {
 /*
 	sync leader's logs to followers
 */
-func (raft *Raft) syncLogsToFollowers() {
-	for server := range raft.peers {
-		if server == raft.me {
+func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
+	success := false
+	replyChan := make(chan AppendEntriesReply, len(raft.peers) - 1)
+	for follower := range raft.peers {
+		if follower == raft.me {
 			continue
 		}
-		go raft.sendAppendRequest(server)
+		go raft.sendAppendRequest(follower, replyChan)
+	}
+	timer := time.After(timeout)
+	threshold := len(raft.peers)/2 + 1
+	succeeded := 0
+	finished := false
+	for raft.isLeader() && !finished {
+		select {
+		case reply := <- replyChan:
+			if reply.HasStepDown {
+				success = false
+				raft.stepDown(reply.Term)
+				finished = true
+				break
+			}
+			if reply.Success {
+				log.Printf("SendAppendRequest==> term: %d, raft-id: %d, " +
+					"收到server: %d 发回的AppendEntriesReply，已成功sync",
+					raft.curTermAndVotedFor.currentTerm, raft.me, reply.FollowerPeerId)
+				succeeded++
+				if succeeded >= threshold {
+					success = true
+					finished = true
+					break
+				}
+			}
+		case <-timer:
+			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, " +
+				"等待sync超时，本次agreement失败",
+				raft.curTermAndVotedFor.currentTerm, raft.me)
+			success = false
+			finished = true
+			break
+		}
+	}
+	if success && raft.isLeader() {
+		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, " +
+			"本次agreement成功，一共有%d个follower同步成功，更新commitIndex到%d, 并apply entry",
+			raft.curTermAndVotedFor.currentTerm, raft.me, succeeded, raft.lastLogIndex)
+		raft.commitIndex = raft.lastLogIndex
+		raft.applyCh <- raft.logs[raft.commitIndex]
 	}
 }
 
 /*
 	send append request to followers, from nextIndex to len(raft.logs)
 */
-func (raft *Raft) sendAppendRequest(follower int)  {
+func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesReply)  {
 	// step1: init index
-	latestIndex := len(raft.logs)
+	latestIndex := len(raft.logs) - 1
 	nextIndex := raft.nextIndex[follower]
 	matchIndex := raft.matchIndex[follower]
 	log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 开始向server: %d 发送AppendRequest, nextIndex是: %d",
@@ -46,7 +88,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 	// step2: construct entries, range is from nextIndex to latestIndex
 	entries := make([]interface{}, Min(latestIndex, nextIndex) - matchIndex)
 	entryIndex := 0
-	for i := matchIndex; i < Min(latestIndex, nextIndex); i++ {
+	for i := matchIndex + 1; i <= Min(latestIndex, nextIndex); i++ {
 		entries[entryIndex] = raft.logs[i].Command
 		entryIndex++
 	}
@@ -64,27 +106,30 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 		raft.commitIndex}
 	reply := AppendEntriesReply{}
 	// step5: send AppendEntries rpc request
-	go raft.sendAndHandle(follower, &request, &reply, latestIndex, nextIndex, matchIndex)
+	go raft.sendAndHandle(follower, &request, &reply, latestIndex, nextIndex, matchIndex, replyChan)
 }
 
 func (raft *Raft) sendAndHandle(follower int, request *AppendEntriesArgs, reply *AppendEntriesReply,
-	latestIndex int, nextIndex int, matchIndex int)  {
+	latestIndex int, nextIndex int, matchIndex int, replyChan chan AppendEntriesReply)  {
+	reply.FollowerPeerId = follower
+	reply.HasStepDown = false
 	ok := raft.peers[follower].Call("Raft.LogAppend", request, reply)
 	if ok {
 		success := reply.Success
 		if reply.Term > raft.curTermAndVotedFor.currentTerm {
-			raft.stepDown(reply.Term)
+			reply.HasStepDown = true
 			return
 		}
 		if !success {
 			// that means the matchIndex of the follower should be updated
 			raft.matchIndex[follower] = raft.updateMatchIndex(matchIndex, raft.logs[matchIndex].Term)
-			go raft.sendAppendRequest(follower)
+			go raft.sendAppendRequest(follower, replyChan)
 		} else {
 			raft.nextIndex[follower] = latestIndex
 			raft.matchIndex[follower] = nextIndex - 1
 		}
 	}
+	replyChan <- *reply
 }
 
 /*
@@ -162,7 +207,7 @@ func (raft *Raft) initNextIndex()  {
 		} else {
 			raft.nextIndex[server] = len(raft.logs)
 		}
-		raft.matchIndex[server] = 0
+		raft.matchIndex[server] = raft.nextIndex[server] - 1
 	}
 }
 
