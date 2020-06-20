@@ -39,7 +39,7 @@ func (raft *Raft) Start(command interface{}) (int, int, bool) {
 	index := len(raft.logs)
 	term := raft.curTermAndVotedFor.currentTerm
 	if raft.isLeader() {
-		raft.logs = append(raft.logs, ApplyMsg{Term: term, CommandIndex: index, Command: command})
+		raft.logs = append(raft.logs, ApplyMsg{CommandValid:true, Term: term, CommandIndex: index, Command: command})
 		raft.lastLogIndex = index
 		raft.lastLogTerm = term
 		go raft.syncLogsToFollowers(makeRandomTimeout(600, 150))

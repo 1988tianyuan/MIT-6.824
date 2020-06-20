@@ -79,7 +79,7 @@ func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
 */
 func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesReply)  {
 	// step1: init index
-	latestIndex := len(raft.logs) - 1
+	latestIndex := len(raft.logs)
 	nextIndex := raft.nextIndex[follower]
 	matchIndex := raft.matchIndex[follower]
 	log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 开始向server: %d 发送AppendRequest, nextIndex是: %d",
@@ -126,7 +126,7 @@ func (raft *Raft) sendAndHandle(follower int, request *AppendEntriesArgs, reply 
 			go raft.sendAppendRequest(follower, replyChan)
 		} else {
 			raft.nextIndex[follower] = latestIndex
-			raft.matchIndex[follower] = nextIndex - 1
+			raft.matchIndex[follower] = nextIndex
 		}
 	}
 	replyChan <- *reply

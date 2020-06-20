@@ -63,11 +63,14 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 		if raft.curTermAndVotedFor.currentTerm < recvTerm {
 			raft.stepDown(recvTerm)
 		}
-		if raft.commitIndex != args.CommitIndex {
-			raft.commitIndex = args.CommitIndex
-		}
 		if len(args.Entries) > 0 {
 			raft.appendEntries(args.Entries, matchIndex)
+		}
+		if raft.commitIndex != args.CommitIndex && args.CommitIndex < len(raft.logs) {
+			log.Printf("LogAppend: term: %d, raft-id: %d, 将index:%d 提交到状态机",
+				raft.curTermAndVotedFor.currentTerm, raft.me, args.CommitIndex)
+			raft.commitIndex = args.CommitIndex
+			raft.applyCh <- raft.logs[raft.commitIndex]
 		}
 	} else {
 		reply.Success = false
@@ -82,7 +85,7 @@ func (raft *Raft) appendEntries(entries []interface{}, matchIndex int) {
 	term := raft.curTermAndVotedFor.currentTerm
 	//defer raft.mu.Unlock()
 	for _, entry := range entries {
-		item := ApplyMsg{CommandIndex:currentIndex, Term:term, Command:entry}
+		item := ApplyMsg{CommandValid:true, CommandIndex:currentIndex, Term:term, Command:entry}
 		if currentIndex < len(raft.logs) {
 			raft.logs[currentIndex] = item
 		} else {
@@ -90,14 +93,14 @@ func (raft *Raft) appendEntries(entries []interface{}, matchIndex int) {
 		}
 		currentIndex++
 	}
-	raft.lastLogIndex = currentIndex
+	raft.lastLogIndex = len(raft.logs) - 1
 	raft.lastLogTerm = term
 }
 
 func (raft *Raft) shouldAppendEntries(args *AppendEntriesArgs) (bool,int) {
 	logs := raft.logs
 	index := len(logs) - 1
-	if index < 0 {
+	if index <= 0 {
 		return true, 0
 	} else {
 		for index >= args.PrevLogIndex {
