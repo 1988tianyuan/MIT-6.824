@@ -67,10 +67,16 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 			raft.appendEntries(args.Entries, matchIndex)
 		}
 		if raft.commitIndex != args.CommitIndex && args.CommitIndex < len(raft.logs) {
-			log.Printf("LogAppend: term: %d, raft-id: %d, 将index:%d 提交到状态机",
+			shouldCommitIndex := raft.commitIndex + 1
+			for shouldCommitIndex <= args.CommitIndex {
+				log.Printf("LogAppend: term: %d, raft-id: %d, 将index:%d 提交到状态机",
+					raft.curTermAndVotedFor.currentTerm, raft.me, shouldCommitIndex)
+				raft.applyCh <- raft.logs[shouldCommitIndex]
+				shouldCommitIndex++
+			}
+			log.Printf("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d",
 				raft.curTermAndVotedFor.currentTerm, raft.me, args.CommitIndex)
 			raft.commitIndex = args.CommitIndex
-			raft.applyCh <- raft.logs[raft.commitIndex]
 		}
 	} else {
 		reply.Success = false
