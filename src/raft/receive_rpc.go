@@ -109,13 +109,10 @@ func (raft *Raft) shouldAppendEntries(args *AppendEntriesArgs) (bool,int) {
 	if index <= 0 {
 		return true, 0
 	} else {
-		for index >= args.PrevLogIndex {
-			term := logs[index].Term
-			if term != args.PrevLogTerm {
-				index--
-				continue
-			} else {
-				return true, index
+		if args.PrevLogIndex < len(logs) {
+			applyMsg := logs[args.PrevLogIndex]
+			if applyMsg.Term == args.PrevLogTerm && applyMsg.CommandIndex == args.PrevLogIndex {
+				return true, args.PrevLogIndex
 			}
 		}
 	}
