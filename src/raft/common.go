@@ -11,7 +11,7 @@ const (
 	CANDIDATE               State = "CANDIDATE"
 	FOLLOWER                State = "FOLLOWER"
 	CANDIDATE_TIMEOUT_RANGE int64 = 400
-	HEARTBEAT_PERIOD              = time.Duration(100) * time.Millisecond
+	HEARTBEAT_PERIOD              = time.Duration(50) * time.Millisecond
 )
 
 func (raft *Raft) Kill() {

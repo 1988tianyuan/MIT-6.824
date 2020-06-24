@@ -59,6 +59,8 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term int
 	Success bool
+	HasStepDown bool
+	FollowerPeerId int
 }
 
 type RequestVoteReply struct {
