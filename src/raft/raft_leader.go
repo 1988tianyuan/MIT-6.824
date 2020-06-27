@@ -65,7 +65,7 @@ func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
 			break
 		}
 	}
-	if success && raft.isLeader() && raft.commitIndex != raft.lastLogIndex {
+	if success && raft.isLeader() {
 		shouldCommitIndex := raft.commitIndex + 1
 		for shouldCommitIndex <= raft.lastLogIndex {
 			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
