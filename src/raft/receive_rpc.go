@@ -1,6 +1,8 @@
 package raft
 
-import "log"
+import (
+	"log"
+)
 
 func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	raft.mu.Lock()
@@ -33,15 +35,25 @@ func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		raft.curTermAndVotedFor.votedFor = candidateId
 		reply.VoteGranted = true
 		reply.Term = recvTerm
+	} else {
+		log.Printf("RequestVote==> term: %d, raft-id: %d, 给raft-id:%d 投反对票，它的term是:%d, " +
+			"它的lastLogIndex是:%d, 它的lastLogTerm是:%d, 而我的lastLogIndex是:%d, 我的lastLogTerm是:%d",
+			raft.curTermAndVotedFor.currentTerm, raft.me, args.CandidateId, args.Term,
+			args.LastLogIndex, args.LastLogTerm, raft.lastLogIndex, raft.lastLogTerm)
 	}
 }
 
 func (raft *Raft) shouldGrant(args *RequestVoteArgs) bool {
 	recvLastLogIndex := args.LastLogIndex
 	recvLastLogTerm := args.LastLogTerm
-	return raft.curTermAndVotedFor.votedFor == -1 &&
-		recvLastLogTerm >= raft.lastLogTerm &&
-		recvLastLogIndex >= raft.lastLogIndex
+	if raft.curTermAndVotedFor.votedFor == -1 {
+		if recvLastLogTerm > raft.lastLogTerm {
+			return true
+		} else if recvLastLogTerm == raft.lastLogTerm {
+			return recvLastLogIndex >= raft.lastLogIndex
+		}
+	}
+	return false
 }
 
 func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -64,32 +76,40 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 			raft.stepDown(recvTerm)
 		}
 		if len(args.Entries) > 0 {
-			raft.appendEntries(args.Entries, matchIndex)
+			matchIndex = raft.appendEntries(args.Entries, matchIndex)
 		}
-		if raft.commitIndex != args.CommitIndex && args.CommitIndex < len(raft.logs) {
-			shouldCommitIndex := raft.commitIndex + 1
-			for shouldCommitIndex <= args.CommitIndex {
-				log.Printf("LogAppend: term: %d, raft-id: %d, 将index:%d 提交到状态机",
-					raft.curTermAndVotedFor.currentTerm, raft.me, shouldCommitIndex)
-				raft.applyCh <- raft.logs[shouldCommitIndex]
-				shouldCommitIndex++
-			}
-			log.Printf("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d",
-				raft.curTermAndVotedFor.currentTerm, raft.me, args.CommitIndex)
-			raft.commitIndex = args.CommitIndex
-		}
+		go raft.doCommit(args.CommitIndex, matchIndex)
 	} else {
 		reply.Success = false
 	}
 }
 
-func (raft *Raft) appendEntries(entries []interface{}, matchIndex int) {
+func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
+	if raft.commitIndex < recvCommitIndex && recvCommitIndex < len(raft.logs) {
+		var endIndex int
+		if recvCommitIndex > matchIndex && raft.logs[recvCommitIndex].Term != raft.curTermAndVotedFor.currentTerm {
+			endIndex = matchIndex
+		} else {
+			endIndex = recvCommitIndex
+		}
+		shouldCommitIndex := raft.commitIndex + 1
+		for shouldCommitIndex <= endIndex {
+			log.Printf("LogAppend: term: %d, raft-id: %d, 将index:%d 提交到状态机",
+				raft.curTermAndVotedFor.currentTerm, raft.me, shouldCommitIndex)
+			raft.applyCh <- raft.logs[shouldCommitIndex]
+			shouldCommitIndex++
+		}
+		raft.commitIndex = endIndex
+		log.Printf("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d, 最终matchIndex是:%d",
+			raft.curTermAndVotedFor.currentTerm, raft.me, raft.commitIndex, matchIndex)
+	}
+}
+
+func (raft *Raft) appendEntries(entries []interface{}, matchIndex int) int {
 	log.Printf("LogAppend: term: %d, raft-id: %d, 开始append，当前matchIndex是%d",
 		raft.curTermAndVotedFor.currentTerm, raft.me, matchIndex)
-	//raft.mu.Lock()
 	currentIndex := matchIndex + 1
 	term := raft.curTermAndVotedFor.currentTerm
-	//defer raft.mu.Unlock()
 	for _, entry := range entries {
 		item := ApplyMsg{CommandValid:true, CommandIndex:currentIndex, Term:term, Command:entry}
 		if currentIndex < len(raft.logs) {
@@ -101,6 +121,9 @@ func (raft *Raft) appendEntries(entries []interface{}, matchIndex int) {
 	}
 	raft.lastLogIndex = len(raft.logs) - 1
 	raft.lastLogTerm = term
+	log.Printf("LogAppend: term: %d, raft-id: %d, 结束append，最后matchIndex是%d",
+		raft.curTermAndVotedFor.currentTerm, raft.me, currentIndex - 1)
+	return currentIndex - 1
 }
 
 func (raft *Raft) shouldAppendEntries(args *AppendEntriesArgs) (bool,int) {
@@ -109,13 +132,10 @@ func (raft *Raft) shouldAppendEntries(args *AppendEntriesArgs) (bool,int) {
 	if index <= 0 {
 		return true, 0
 	} else {
-		for index >= args.PrevLogIndex {
-			term := logs[index].Term
-			if term != args.PrevLogTerm {
-				index--
-				continue
-			} else {
-				return true, index
+		if args.PrevLogIndex < len(logs) {
+			applyMsg := logs[args.PrevLogIndex]
+			if applyMsg.Term == args.PrevLogTerm && applyMsg.CommandIndex == args.PrevLogIndex {
+				return true, args.PrevLogIndex
 			}
 		}
 	}

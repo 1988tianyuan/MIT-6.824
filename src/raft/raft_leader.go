@@ -65,7 +65,7 @@ func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
 			break
 		}
 	}
-	if success && raft.isLeader() {
+	if success && raft.isLeader() && raft.commitIndex != raft.lastLogIndex {
 		shouldCommitIndex := raft.commitIndex + 1
 		for shouldCommitIndex <= raft.lastLogIndex {
 			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
@@ -74,9 +74,11 @@ func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
 			shouldCommitIndex++
 		}
 		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, " +
-			"本次agreement成功，一共有%d个follower同步成功，更新commitIndex到%d, 并apply entry",
+			"本次agreement成功，一共有%d个raft同步成功，更新commitIndex到%d, 并apply entry",
 			raft.curTermAndVotedFor.currentTerm, raft.me, succeeded, raft.lastLogIndex)
+		raft.mu.Lock()
 		raft.commitIndex = raft.lastLogIndex
+		defer raft.mu.Unlock()
 	}
 }
 
