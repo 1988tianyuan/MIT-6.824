@@ -36,6 +36,8 @@ import "labrpc"
 // the leader.
 //
 func (raft *Raft) Start(command interface{}) (int, int, bool) {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
 	index := len(raft.logs)
 	term := raft.curTermAndVotedFor.currentTerm
 	if raft.isLeader() {

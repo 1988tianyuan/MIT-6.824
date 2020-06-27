@@ -47,7 +47,7 @@ type config struct {
 	logs      []map[int]int // copy of each server's committed entries
 	start     time.Time     // time at which make_config() was called
 	// begin()/end() statistics
-	t0        time.Time // time at which test_test.go called cfg.begin()
+	t0        time.Time // time at which test_2C.go called cfg.begin()
 	rpcs0     int       // rpcTotal() at start of test
 	cmds0     int       // number of agreements
 	maxIndex  int
