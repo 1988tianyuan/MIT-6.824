@@ -78,26 +78,30 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 		if len(args.Entries) > 0 {
 			matchIndex = raft.appendEntries(args.Entries, matchIndex)
 		}
-		if raft.commitIndex != args.CommitIndex && args.CommitIndex < len(raft.logs) {
-			var endIndex int
-			if args.CommitIndex > matchIndex {
-				endIndex = matchIndex
-			} else {
-				endIndex = args.CommitIndex
-			}
-			shouldCommitIndex := raft.commitIndex + 1
-			for shouldCommitIndex <= endIndex {
-				log.Printf("LogAppend: term: %d, raft-id: %d, 将index:%d 提交到状态机",
-					raft.curTermAndVotedFor.currentTerm, raft.me, shouldCommitIndex)
-				raft.applyCh <- raft.logs[shouldCommitIndex]
-				shouldCommitIndex++
-			}
-			raft.commitIndex = endIndex
-			log.Printf("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d",
-				raft.curTermAndVotedFor.currentTerm, raft.me, raft.commitIndex)
-		}
+		go raft.doCommit(args.CommitIndex, matchIndex)
 	} else {
 		reply.Success = false
+	}
+}
+
+func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
+	if raft.commitIndex < recvCommitIndex && recvCommitIndex < len(raft.logs) {
+		var endIndex int
+		if recvCommitIndex > matchIndex && raft.logs[recvCommitIndex].Term != raft.curTermAndVotedFor.currentTerm {
+			endIndex = matchIndex
+		} else {
+			endIndex = recvCommitIndex
+		}
+		shouldCommitIndex := raft.commitIndex + 1
+		for shouldCommitIndex <= endIndex {
+			log.Printf("LogAppend: term: %d, raft-id: %d, 将index:%d 提交到状态机",
+				raft.curTermAndVotedFor.currentTerm, raft.me, shouldCommitIndex)
+			raft.applyCh <- raft.logs[shouldCommitIndex]
+			shouldCommitIndex++
+		}
+		raft.commitIndex = endIndex
+		log.Printf("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d, 最终matchIndex是:%d",
+			raft.curTermAndVotedFor.currentTerm, raft.me, raft.commitIndex, matchIndex)
 	}
 }
 
@@ -117,6 +121,8 @@ func (raft *Raft) appendEntries(entries []interface{}, matchIndex int) int {
 	}
 	raft.lastLogIndex = len(raft.logs) - 1
 	raft.lastLogTerm = term
+	log.Printf("LogAppend: term: %d, raft-id: %d, 结束append，最后matchIndex是%d",
+		raft.curTermAndVotedFor.currentTerm, raft.me, currentIndex - 1)
 	return currentIndex - 1
 }
 
