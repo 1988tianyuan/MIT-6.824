@@ -86,6 +86,9 @@ func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
 	send append request to followers, from nextIndex to len(raft.logs)
 */
 func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesReply)  {
+	if !raft.isLeader() {
+		return
+	}
 	// step1: init index
 	latestIndex := len(raft.logs) - 1
 	matchIndex := raft.matchIndex[follower]
@@ -94,7 +97,7 @@ func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesRe
 
 	// step2: construct entries, range is from nextIndex to latestIndex
 	entries := make([]interface{}, latestIndex - matchIndex)
-	entryIndex := 0
+	entryIndex := 0``
 	for i := matchIndex + 1; i <= latestIndex; i++ {
 		entries[entryIndex] = raft.logs[i].Command
 		entryIndex++
@@ -125,15 +128,15 @@ func (raft *Raft) sendAndHandle(follower int, request *AppendEntriesArgs, reply 
 		success := reply.Success
 		if reply.Term > raft.curTermAndVotedFor.currentTerm {
 			reply.HasStepDown = true
-			return
-		}
-		if !success {
-			// that means the matchIndex of the follower should be updated
-			raft.matchIndex[follower] = raft.updateMatchIndex(matchIndex, raft.logs[matchIndex].Term)
-			go raft.sendAppendRequest(follower, replyChan)
 		} else {
-			raft.nextIndex[follower] = latestIndex + 1
-			raft.matchIndex[follower] = latestIndex
+			if !success {
+				// that means the matchIndex of the follower should be updated
+				raft.matchIndex[follower] = raft.updateMatchIndex(matchIndex, raft.logs[matchIndex].Term)
+				go raft.sendAppendRequest(follower, replyChan)
+			} else {
+				raft.nextIndex[follower] = latestIndex + 1
+				raft.matchIndex[follower] = latestIndex
+			}
 		}
 	}
 	replyChan <- *reply
