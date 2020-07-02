@@ -5,19 +5,19 @@ import (
 	"time"
 )
 
+func (raft *Raft) changeToLeader(votes int)  {
+	raft.state = LEADER
+	log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票",
+		raft.curTermAndVotedFor.currentTerm, raft.me, votes)
+	go raft.doLeaderJob()
+}
+
 /*
 	begin LEADER's job
 */
 func (raft *Raft) doLeaderJob()  {
 	raft.initNextIndex()
 	raft.doHeartbeatJob()
-}
-
-func (raft *Raft) changeToLeader(votes int)  {
-	raft.state = LEADER
-	log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票",
-		raft.curTermAndVotedFor.currentTerm, raft.me, votes)
-	go raft.doLeaderJob()
 }
 
 /*
@@ -97,7 +97,7 @@ func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesRe
 
 	// step2: construct entries, range is from nextIndex to latestIndex
 	entries := make([]interface{}, latestIndex - matchIndex)
-	entryIndex := 0``
+	entryIndex := 0
 	for i := matchIndex + 1; i <= latestIndex; i++ {
 		entries[entryIndex] = raft.logs[i].Command
 		entryIndex++
@@ -212,10 +212,11 @@ func (raft *Raft) initNextIndex()  {
 		if server == raft.me {
 			continue
 		}
-		if len(raft.logs) == 0 {
+		total := len(raft.logs)
+		if total == 0 {
 			raft.nextIndex[server] = 1
 		} else {
-			raft.nextIndex[server] = len(raft.logs)
+			raft.nextIndex[server] = raft.logs[total- 1].CommandIndex + 1
 		}
 		raft.matchIndex[server] = raft.nextIndex[server] - 1
 	}

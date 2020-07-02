@@ -26,7 +26,7 @@ func (raft *Raft) readPersist(data []byte) {
 	}
 	// Your code here (2C).
 	// Example:
-	// r := bytes.NewBuffer(data)
+	//r := bytes.NewBuffer(data)
 	// d := labgob.NewDecoder(r)
 	// var xxx
 	// var yyy

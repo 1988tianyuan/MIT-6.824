@@ -59,7 +59,7 @@ func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan 
 	raft.readPersist(persister.ReadRaftState())
 	raft.applyCh = applyCh
 	raft.logs = make([] ApplyMsg, 0)
-	raft.logs = append(raft.logs, ApplyMsg{})		// init empty log for index=0
+	raft.logs = append(raft.logs, ApplyMsg{CommandIndex:0, CommandValid:false})		// init empty log for index=0
 
 	go raft.doFollowerJob()
 
