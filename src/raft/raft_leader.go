@@ -66,7 +66,9 @@ func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
 			break
 		}
 	}
-	if success && raft.isLeader() {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
+	if success && raft.isLeader() && endIndex > raft.commitIndex {
 		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, " +
 			"本次agreement成功，一共有%d个raft同步成功，更新commitIndex到%d, 并apply entry",
 			raft.curTermAndVotedFor.currentTerm, raft.me, succeeded, endIndex)
@@ -77,9 +79,7 @@ func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
 			raft.applyCh <- raft.logs[shouldCommitIndex]
 			shouldCommitIndex++
 		}
-		raft.mu.Lock()
 		raft.commitIndex = endIndex
-		defer raft.mu.Unlock()
 	}
 }
 
@@ -88,7 +88,9 @@ func (raft *Raft) handleAppendRequestResult(reply AppendEntriesReply, replyChan 
 	if reply.Success {
 		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 发回的AppendEntriesReply，已成功sync",
 			raft.curTermAndVotedFor.currentTerm, raft.me, reply.FollowerPeerId)
-		raft.matchIndex[follower] = reply.EndIndex
+		if raft.matchIndex[follower] < reply.EndIndex {
+			raft.matchIndex[follower] = reply.EndIndex
+		}
 		return true
 	} else {
 		// that means the matchIndex of the follower should be updated
