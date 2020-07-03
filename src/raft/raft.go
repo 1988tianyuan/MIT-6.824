@@ -38,7 +38,7 @@ import "labrpc"
 func (raft *Raft) Start(command interface{}) (int, int, bool) {
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
-	index := len(raft.logs)
+	index := raft.logs[len(raft.logs) - 1].CommandIndex + 1
 	term := raft.curTermAndVotedFor.currentTerm
 	if raft.isLeader() {
 		raft.logs = append(raft.logs, ApplyMsg{CommandValid:true, Term: term, CommandIndex: index, Command: command})

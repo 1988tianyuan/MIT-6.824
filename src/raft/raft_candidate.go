@@ -43,8 +43,8 @@ func (raft *Raft) sendRequestVote(server int, args *RequestVoteArgs, replyChan c
 }
 
 func (raft *Raft) beginLeaderElection(timeout time.Duration) {
-	replyChan := make(chan RequestVoteReply, len(raft.peers) - 1)  // channel for receive async vote request
 	if raft.isCandidate() {
+		replyChan := make(chan RequestVoteReply, len(raft.peers) - 1)  // channel for receive async vote request
 		args := &RequestVoteArgs{
 			Term:raft.curTermAndVotedFor.currentTerm,
 			CandidateId:raft.me,

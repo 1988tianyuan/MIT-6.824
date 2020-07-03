@@ -25,7 +25,6 @@ type Raft struct {
 	lastLogTerm        int
 	leaderId           int
 	matchIndex         []int
-	nextIndex          []int
 	logs               []ApplyMsg
 	applyCh            chan ApplyMsg
 }
@@ -59,8 +58,9 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term int
 	Success bool
-	HasStepDown bool
 	FollowerPeerId int
+	EndIndex int
+	SendOk bool
 }
 
 type RequestVoteReply struct {
