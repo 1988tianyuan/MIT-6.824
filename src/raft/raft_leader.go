@@ -16,7 +16,7 @@ func (raft *Raft) changeToLeader(votes int)  {
 	begin LEADER's job
 */
 func (raft *Raft) doLeaderJob()  {
-	raft.initNextIndex()
+	raft.initMatchIndex()
 	raft.doHeartbeatJob()
 }
 
@@ -36,25 +36,26 @@ func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
 	threshold := len(raft.peers)/2 + 1
 	succeeded := 1
 	finished := false
+	endIndex := 0
 	for raft.isLeader() && !finished {
 		select {
 		case reply := <- replyChan:
-			if reply.HasStepDown {
-				success = false
+			if reply.Term > raft.curTermAndVotedFor.currentTerm {
 				raft.stepDown(reply.Term)
+				success = false
 				finished = true
 				break
 			}
-			if reply.Success {
-				log.Printf("SendAppendRequest==> term: %d, raft-id: %d, " +
-					"收到server: %d 发回的AppendEntriesReply，已成功sync",
-					raft.curTermAndVotedFor.currentTerm, raft.me, reply.FollowerPeerId)
+			if reply.SendOk && raft.handleAppendRequestResult(reply, replyChan) {
 				succeeded++
-				if succeeded >= threshold {
-					success = true
-					finished = true
-					break
+				if endIndex == 0 || endIndex < reply.EndIndex {
+					endIndex = reply.EndIndex
 				}
+			}
+			if succeeded >= threshold {
+				success = true
+				finished = true
+				break
 			}
 		case <-timer:
 			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, " +
@@ -65,20 +66,37 @@ func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
 			break
 		}
 	}
-	if success && raft.isLeader() {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
+	if success && raft.isLeader() && endIndex > raft.commitIndex {
+		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, " +
+			"本次agreement成功，一共有%d个raft同步成功，更新commitIndex到%d, 并apply entry",
+			raft.curTermAndVotedFor.currentTerm, raft.me, succeeded, endIndex)
 		shouldCommitIndex := raft.commitIndex + 1
-		for shouldCommitIndex <= raft.lastLogIndex {
+		for shouldCommitIndex <= endIndex {
 			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
 				raft.curTermAndVotedFor.currentTerm, raft.me, shouldCommitIndex)
 			raft.applyCh <- raft.logs[shouldCommitIndex]
 			shouldCommitIndex++
 		}
-		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, " +
-			"本次agreement成功，一共有%d个raft同步成功，更新commitIndex到%d, 并apply entry",
-			raft.curTermAndVotedFor.currentTerm, raft.me, succeeded, raft.lastLogIndex)
-		raft.mu.Lock()
-		raft.commitIndex = raft.lastLogIndex
-		defer raft.mu.Unlock()
+		raft.commitIndex = endIndex
+	}
+}
+
+func (raft *Raft) handleAppendRequestResult(reply AppendEntriesReply, replyChan chan AppendEntriesReply) bool {
+	follower := reply.FollowerPeerId
+	if reply.Success {
+		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 发回的AppendEntriesReply，已成功sync",
+			raft.curTermAndVotedFor.currentTerm, raft.me, reply.FollowerPeerId)
+		if raft.matchIndex[follower] < reply.EndIndex {
+			raft.matchIndex[follower] = reply.EndIndex
+		}
+		return true
+	} else {
+		// that means the matchIndex of the follower should be updated
+		raft.updateMatchIndex(follower)
+		go raft.sendAppendRequest(follower, replyChan)
+		return false
 	}
 }
 
@@ -90,12 +108,12 @@ func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesRe
 		return
 	}
 	// step1: init index
-	latestIndex := len(raft.logs) - 1
+	latestIndex := raft.lastLogIndex
 	matchIndex := raft.matchIndex[follower]
-	log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 开始向server: %d 发送AppendRequest, nextIndex是: %d",
-		raft.curTermAndVotedFor.currentTerm, raft.me, follower, matchIndex + 1)
+	log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 开始向server: %d 发送AppendRequest, matchIndex是: %d",
+		raft.curTermAndVotedFor.currentTerm, raft.me, follower, matchIndex)
 
-	// step2: construct entries, range is from nextIndex to latestIndex
+	// step2: construct entries, range is from matchIndex + 1 to latestIndex
 	entries := make([]interface{}, latestIndex - matchIndex)
 	entryIndex := 0
 	for i := matchIndex + 1; i <= latestIndex; i++ {
@@ -103,7 +121,7 @@ func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesRe
 		entryIndex++
 	}
 
-	// step3: init prevLogIndex as nextIndex - 1
+	// step3: init prevLogIndex as matchIndex
 	prevLogIndex, prevLogTerm := raft.makePreParams(matchIndex)
 
 	// step4: construct AppendEntriesArgs
@@ -114,55 +132,27 @@ func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesRe
 		prevLogTerm,
 		entries,
 		raft.commitIndex}
-	reply := AppendEntriesReply{}
 	// step5: send AppendEntries rpc request
-	go raft.sendAndHandle(follower, &request, &reply, latestIndex, matchIndex, replyChan)
-}
-
-func (raft *Raft) sendAndHandle(follower int, request *AppendEntriesArgs, reply *AppendEntriesReply,
-	latestIndex int, matchIndex int, replyChan chan AppendEntriesReply)  {
-	reply.FollowerPeerId = follower
-	reply.HasStepDown = false
-	ok := raft.peers[follower].Call("Raft.LogAppend", request, reply)
-	if ok {
-		success := reply.Success
-		if reply.Term > raft.curTermAndVotedFor.currentTerm {
-			reply.HasStepDown = true
-		} else {
-			if !success {
-				// that means the matchIndex of the follower should be updated
-				raft.matchIndex[follower] = raft.updateMatchIndex(matchIndex, raft.logs[matchIndex].Term)
-				go raft.sendAppendRequest(follower, replyChan)
-			} else {
-				raft.nextIndex[follower] = latestIndex + 1
-				raft.matchIndex[follower] = latestIndex
-			}
-		}
+	reply := AppendEntriesReply{FollowerPeerId:follower, EndIndex:latestIndex, SendOk:true}
+	ok := raft.peers[follower].Call("Raft.LogAppend", &request, &reply)
+	if !ok {
+		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 向server: %d 发送AppendRequest失败了",
+			raft.curTermAndVotedFor.currentTerm, raft.me, follower)
+		reply.SendOk = false
 	}
-	replyChan <- *reply
+	replyChan <- reply
 }
 
-/*
-	update nextIndex as last term's log index
-*/
-func (raft *Raft) updateNextIndex(nextIndex int, term int) int {
-	updatedIndex := 0
-	for i := nextIndex - 1; i >= 0; i-- {
-		if raft.logs[i].Term != term {
-			updatedIndex = i
-		}
-	}
-	return updatedIndex
-}
-
-func (raft *Raft) updateMatchIndex(matchIndex int, term int) int {
+func (raft *Raft) updateMatchIndex(follower int) {
+	matchIndex := raft.matchIndex[follower]
+	term := raft.logs[matchIndex].Term
 	updatedIndex := 0
 	for i := matchIndex - 1; i >= 0; i-- {
 		if raft.logs[i].Term != term {
 			updatedIndex = i
 		}
 	}
-	return updatedIndex
+	raft.matchIndex[follower] = updatedIndex
 }
 
 /*
@@ -205,20 +195,18 @@ func (raft *Raft) sendHeartbeat(follower int) {
 	init each server's nextIndex as logs's length
 	init matchIndex as 0
 */
-func (raft *Raft) initNextIndex()  {
-	raft.nextIndex = make([]int, len(raft.peers))
+func (raft *Raft) initMatchIndex()  {
 	raft.matchIndex = make([]int, len(raft.peers))
-	for server := range raft.nextIndex {
+	for server := range raft.matchIndex {
 		if server == raft.me {
 			continue
 		}
 		total := len(raft.logs)
 		if total == 0 {
-			raft.nextIndex[server] = 1
+			raft.matchIndex[server] = 0
 		} else {
-			raft.nextIndex[server] = raft.logs[total- 1].CommandIndex + 1
+			raft.matchIndex[server] = raft.logs[total - 1].CommandIndex
 		}
-		raft.matchIndex[server] = raft.nextIndex[server] - 1
 	}
 }
 
