@@ -10,7 +10,8 @@ type State string
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
-	persister *Persister          // Object to hold this peer's persisted state
+	persister *Persister          // Object to hold this peer's persisted state\
+	applyCh            chan ApplyMsg
 	me        int                 // this peer's index into peers[]
 	// Your data here (2A, 2B, 2C).//todo
 	// Look at the paper's Figure 2 for a description of what
@@ -18,24 +19,23 @@ type Raft struct {
 	state              State
 	isStart            bool
 	lastHeartBeatTime  int64
-	curTermAndVotedFor CurTermAndVotedFor
-	commitIndex        int
-	lastApplied        int
-	lastLogIndex       int
-	lastLogTerm        int
 	leaderId           int
 	matchIndex         []int
-	logs               []ApplyMsg
-	applyCh            chan ApplyMsg
+	lastApplied        int
+	LastLogIndex       int
+	LastLogTerm        int
+	CurTermAndVotedFor CurTermAndVotedFor
+	CommitIndex        int
+	Logs               []ApplyMsg
 }
 
 func (raft *Raft) GetState() (int, bool) {
-	return raft.curTermAndVotedFor.currentTerm, raft.isLeader()
+	return raft.CurTermAndVotedFor.CurrentTerm, raft.isLeader()
 }
 
 type CurTermAndVotedFor struct {
-	currentTerm          int		// latest term server has seen (initialized to 0on first boot, increases monotonically)
-	votedFor  			 int		// voted peer id during this term
+	CurrentTerm int // latest term server has seen (initialized to 0on first boot, increases monotonically)
+	VotedFor    int // voted peer id during this term
 }
 
 type RequestVoteArgs struct {
@@ -64,7 +64,7 @@ type AppendEntriesReply struct {
 }
 
 type RequestVoteReply struct {
-	Term int	// currentTerm, for candidate to update itself
+	Term int	// CurrentTerm, for candidate to update itself
 	VoteGranted bool	// true means candidate received vote
 	Server int
 	HasStepDown bool

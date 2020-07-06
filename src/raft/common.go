@@ -29,13 +29,14 @@ func (raft *Raft) isCandidate() bool {
 	return raft.state == CANDIDATE
 }
 
-// need to be called in lock, and the term should be bigger than raft's currentTerm
+// need to be called in lock, and the term should be bigger than raft's CurrentTerm
 func (raft *Raft) stepDown(term int)  {
-	raft.curTermAndVotedFor = CurTermAndVotedFor{currentTerm:term, votedFor:-1}
+	raft.CurTermAndVotedFor = CurTermAndVotedFor{CurrentTerm: term, VotedFor:-1}
 	if !raft.isFollower() {
 		raft.state = FOLLOWER
 		go raft.doFollowerJob()
 	}
+	go raft.persist()
 }
 
 func makeRandomTimeout(start int64, ran int64) time.Duration {

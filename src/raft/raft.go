@@ -38,12 +38,13 @@ import "labrpc"
 func (raft *Raft) Start(command interface{}) (int, int, bool) {
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
-	index := raft.logs[len(raft.logs) - 1].CommandIndex + 1
-	term := raft.curTermAndVotedFor.currentTerm
+	index := raft.Logs[len(raft.Logs) - 1].CommandIndex + 1
+	term := raft.CurTermAndVotedFor.CurrentTerm
 	if raft.isLeader() {
-		raft.logs = append(raft.logs, ApplyMsg{CommandValid:true, Term: term, CommandIndex: index, Command: command})
-		raft.lastLogIndex = index
-		raft.lastLogTerm = term
+		raft.Logs = append(raft.Logs, ApplyMsg{CommandValid: true, Term: term, CommandIndex: index, Command: command})
+		raft.LastLogIndex = index
+		raft.LastLogTerm = term
+		go raft.persist()
 		go raft.syncLogsToFollowers(makeRandomTimeout(600, 150))
 	}
 	return index, term, raft.isLeader()
@@ -58,9 +59,10 @@ func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan 
 	raft.isStart = true
 	raft.readPersist(persister.ReadRaftState())
 	raft.applyCh = applyCh
-	raft.logs = make([] ApplyMsg, 0)
-	raft.logs = append(raft.logs, ApplyMsg{CommandIndex:0, CommandValid:false})		// init empty log for index=0
-
+	if len(raft.Logs) == 0 {
+		raft.Logs = make([] ApplyMsg, 0)
+		raft.Logs = append(raft.Logs, ApplyMsg{CommandIndex: 0, CommandValid:false}) // init empty log for index=0
+	}
 	go raft.doFollowerJob()
 
 	//Your initialization code here (2A, 2B, 2C).//todo
