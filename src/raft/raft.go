@@ -45,7 +45,7 @@ func (raft *Raft) Start(command interface{}) (int, int, bool) {
 		raft.LastLogIndex = index
 		raft.LastLogTerm = term
 		go raft.persist()
-		go raft.syncLogsToFollowers(makeRandomTimeout(600, 150))
+		go raft.syncLogsToFollowers(makeRandomTimeout(600, 300))
 	}
 	return index, term, raft.isLeader()
 }

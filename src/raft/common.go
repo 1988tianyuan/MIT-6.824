@@ -10,7 +10,8 @@ const (
 	CANDIDATE               State = "CANDIDATE"
 	FOLLOWER                State = "FOLLOWER"
 	CANDIDATE_TIMEOUT_RANGE int64 = 400
-	HEARTBEAT_PERIOD              = time.Duration(50) * time.Millisecond
+	HEARTBEAT_TIMEOUT_RANGE int64 = 400
+	HEARTBEAT_PERIOD              = time.Duration(100) * time.Millisecond
 )
 
 func (raft *Raft) Kill() {
@@ -36,7 +37,6 @@ func (raft *Raft) stepDown(term int)  {
 		raft.state = FOLLOWER
 		go raft.doFollowerJob()
 	}
-	go raft.persist()
 }
 
 func makeRandomTimeout(start int64, ran int64) time.Duration {

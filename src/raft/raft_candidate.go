@@ -12,7 +12,7 @@ func (raft *Raft) doCandidateJob() {
 		currentTerm := raft.CurTermAndVotedFor.CurrentTerm
 		raft.CurTermAndVotedFor =
 			CurTermAndVotedFor{CurrentTerm: currentTerm + 1, VotedFor:raft.me} // increment term and vote for self
-		timeout := makeRandomTimeout(150, CANDIDATE_TIMEOUT_RANGE)             // random election timeout
+		timeout := makeRandomTimeout(300, CANDIDATE_TIMEOUT_RANGE)             // random election timeout
 		go raft.persist()
 		go raft.beginLeaderElection(timeout)
 		raft.mu.Unlock()
@@ -31,18 +31,6 @@ func (raft *Raft) sendRequestVote(server int, args *RequestVoteArgs, replyChan c
 	reply.HasStepDown = false
 	reply.Server = server
 	ok := raft.peers[server].Call("Raft.RequestVote", args, &reply)
-	retryCount := 0
-	for !ok {
-		log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 向raft:%d 发送RequestVote失败",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, reply.Server)
-		retryCount++
-		if retryCount>= 3 {
-			log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 向raft:%d 发送了三次RequestVote都失败",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.me, reply.Server)
-			break
-		}
-		ok = raft.peers[server].Call("Raft.RequestVote", args, &reply)
-	}
 	if ok {
 		replyTerm := reply.Term
 		if replyTerm > raft.CurTermAndVotedFor.CurrentTerm {
@@ -83,7 +71,7 @@ func (raft *Raft) beginLeaderElection(timeout time.Duration) {
 						raft.CurTermAndVotedFor.CurrentTerm, raft.me, reply.Server)
 					votes++
 				}
-				if votes >= threshold {
+				if votes >= threshold && raft.isCandidate() {
 					raft.mu.Lock()
 					raft.changeToLeader(votes)
 					raft.mu.Unlock()

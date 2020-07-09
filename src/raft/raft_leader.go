@@ -24,6 +24,9 @@ func (raft *Raft) doLeaderJob()  {
 	sync leader's Logs to followers
 */
 func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
+	if !raft.isLeader() {
+		return
+	}
 	success := false
 	replyChan := make(chan AppendEntriesReply, len(raft.peers) - 1)
 	for follower := range raft.peers {
@@ -85,6 +88,9 @@ func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
 }
 
 func (raft *Raft) handleAppendRequestResult(reply AppendEntriesReply, replyChan chan AppendEntriesReply) bool {
+	if reply.Term != raft.CurTermAndVotedFor.CurrentTerm {
+		return false
+	}
 	follower := reply.FollowerPeerId
 	if reply.Success {
 		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 发回的AppendEntriesReply，已成功sync",
@@ -134,10 +140,10 @@ func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesRe
 		entries,
 		raft.CommitIndex}
 	// step5: send AppendEntries rpc request
-	reply := AppendEntriesReply{FollowerPeerId:follower, EndIndex:latestIndex, SendOk:true}
+	reply := AppendEntriesReply{FollowerPeerId:follower, EndIndex:latestIndex}
 	ok := raft.peers[follower].Call("Raft.LogAppend", &request, &reply)
 	retryCount := 0
-	for !ok {
+	for !ok && raft.isLeader() {
 		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 向server: %d 发送AppendRequest失败了",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower)
 		retryCount++
@@ -145,11 +151,12 @@ func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesRe
 			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 向server: %d 连续" +
 				"发送三次AppendRequest失败了",
 				raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower)
-			reply.SendOk = false
 			break
 		}
+		time.Sleep(time.Duration(100) * time.Millisecond)
 		ok = raft.peers[follower].Call("Raft.LogAppend", &request, &reply)
 	}
+	reply.SendOk = ok
 	replyChan <- reply
 }
 
@@ -160,6 +167,7 @@ func (raft *Raft) updateMatchIndex(follower int) {
 	for i := matchIndex - 1; i >= 0; i-- {
 		if raft.Logs[i].Term != term {
 			updatedIndex = i
+			break
 		}
 	}
 	raft.matchIndex[follower] = updatedIndex
@@ -194,11 +202,13 @@ func (raft *Raft) sendHeartbeat(follower int) {
 		CommitIndex:raft.CommitIndex}
 	reply := AppendEntriesReply{}
 	ok := raft.peers[follower].Call("Raft.LogAppend", &args, &reply)
-	raft.mu.Lock()
-	if ok && reply.Term > raft.CurTermAndVotedFor.CurrentTerm {
-		raft.stepDown(reply.Term)
+	if ok {
+		raft.mu.Lock()
+		defer raft.mu.Unlock()
+		if reply.Term > raft.CurTermAndVotedFor.CurrentTerm {
+			raft.stepDown(reply.Term)
+		}
 	}
-	defer raft.mu.Unlock()
 }
 
 /*

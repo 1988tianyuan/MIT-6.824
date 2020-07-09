@@ -14,13 +14,18 @@ import (
 func (raft *Raft) persist() {
 	buffer := new(bytes.Buffer)
 	encoder := labgob.NewEncoder(buffer)
-	_ = encoder.Encode(raft.CurTermAndVotedFor)
-	_ = encoder.Encode(raft.CommitIndex)
-	_ = encoder.Encode(raft.LastLogIndex)
-	_ = encoder.Encode(raft.LastLogTerm)
-	_ = encoder.Encode(raft.Logs)
-	data := buffer.Bytes()
-	raft.persister.SaveRaftState(data)
+	err1 := encoder.Encode(raft.CurTermAndVotedFor)
+	err2 := encoder.Encode(raft.CommitIndex)
+	err3 := encoder.Encode(raft.LastLogIndex)
+	err4 := encoder.Encode(raft.LastLogTerm)
+	err5 := encoder.Encode(raft.Logs)
+	if err1 != nil || err2 != nil || err3 != nil ||
+		err4 != nil || err5 != nil {
+		log.Printf("序列化失败！%v,%v,%v,%v,%v", err1, err2, err3, err4, err5)
+	} else {
+		data := buffer.Bytes()
+		raft.persister.SaveRaftState(data)
+	}
 }
 
 
