@@ -11,6 +11,7 @@ const (
 	FOLLOWER                State = "FOLLOWER"
 	CANDIDATE_TIMEOUT_RANGE int64 = 400
 	HEARTBEAT_TIMEOUT_RANGE int64 = 400
+	SYNC_LOG_TIMEOUT_RANGE  int64 = 400
 	HEARTBEAT_PERIOD              = time.Duration(100) * time.Millisecond
 )
 

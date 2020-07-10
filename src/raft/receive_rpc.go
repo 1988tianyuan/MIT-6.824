@@ -115,13 +115,13 @@ func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 	}
 }
 
-func (raft *Raft) appendEntries(entries []interface{}, matchIndex int) int {
+func (raft *Raft) appendEntries(entries []AppendEntry, matchIndex int) int {
 	log.Printf("LogAppend: term: %d, raft-id: %d, 开始append，当前matchIndex是%d",
 		raft.CurTermAndVotedFor.CurrentTerm, raft.me, matchIndex)
 	currentIndex := matchIndex + 1
 	term := raft.CurTermAndVotedFor.CurrentTerm
 	for _, entry := range entries {
-		item := ApplyMsg{CommandValid:true, CommandIndex:currentIndex, Term:term, Command:entry}
+		item := ApplyMsg{CommandValid:true, CommandIndex:currentIndex, Term:entry.Term, Command:entry.Command}
 		if currentIndex < len(raft.Logs) {
 			raft.Logs[currentIndex] = item
 		} else {

@@ -51,8 +51,14 @@ type AppendEntriesArgs struct {
 	LeaderId     int
 	PrevLogIndex int
 	PrevLogTerm  int
-	Entries      [] interface{}
+	Entries      [] AppendEntry
 	CommitIndex  int
+}
+
+type AppendEntry struct {
+	Command      interface{}
+	CommandIndex int
+	Term 		 int
 }
 
 type AppendEntriesReply struct {

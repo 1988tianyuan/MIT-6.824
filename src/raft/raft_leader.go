@@ -23,10 +23,11 @@ func (raft *Raft) doLeaderJob()  {
 /*
 	sync leader's Logs to followers
 */
-func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
+func (raft *Raft) syncLogsToFollowers() {
 	if !raft.isLeader() {
 		return
 	}
+	timeout := time.Duration(makeRandomTimeout(600, SYNC_LOG_TIMEOUT_RANGE))
 	success := false
 	replyChan := make(chan AppendEntriesReply, len(raft.peers) - 1)
 	for follower := range raft.peers {
@@ -69,25 +70,34 @@ func (raft *Raft) syncLogsToFollowers(timeout time.Duration) {
 			break
 		}
 	}
-	raft.mu.Lock()
-	defer raft.mu.Unlock()
-	if success && raft.isLeader() && endIndex > raft.CommitIndex {
+	if success {
 		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, " +
 			"本次agreement成功，一共有%d个raft同步成功，更新commitIndex到%d, 并apply entry",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.me, succeeded, endIndex)
-		shouldCommitIndex := raft.CommitIndex + 1
+		go raft.commitAndApply(endIndex)
+	}
+}
+
+func (raft *Raft) commitAndApply(endIndex int) {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
+	commitIndex := raft.CommitIndex
+	if raft.isLeader() && endIndex > commitIndex {
+		shouldCommitIndex := commitIndex + 1
 		for shouldCommitIndex <= endIndex {
 			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
 				raft.CurTermAndVotedFor.CurrentTerm, raft.me, shouldCommitIndex)
 			raft.applyCh <- raft.Logs[shouldCommitIndex]
 			shouldCommitIndex++
 		}
-		raft.CommitIndex = endIndex
+		raft.CommitIndex = endIndex		// refresh latest commitIndex
 		go raft.persist()
 	}
 }
 
 func (raft *Raft) handleAppendRequestResult(reply AppendEntriesReply, replyChan chan AppendEntriesReply) bool {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
 	if reply.Term != raft.CurTermAndVotedFor.CurrentTerm {
 		return false
 	}
@@ -102,7 +112,6 @@ func (raft *Raft) handleAppendRequestResult(reply AppendEntriesReply, replyChan 
 	} else {
 		// that means the matchIndex of the follower should be updated
 		raft.updateMatchIndex(follower)
-		go raft.sendAppendRequest(follower, replyChan)
 		return false
 	}
 }
@@ -121,10 +130,12 @@ func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesRe
 		raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, matchIndex)
 
 	// step2: construct entries, range is from matchIndex + 1 to latestIndex
-	entries := make([]interface{}, latestIndex - matchIndex)
+	entries := make([]AppendEntry, latestIndex - matchIndex)
 	entryIndex := 0
 	for i := matchIndex + 1; i <= latestIndex; i++ {
-		entries[entryIndex] = raft.Logs[i].Command
+		applyMsg := raft.Logs[i]
+		entries[entryIndex] = AppendEntry{applyMsg.Command, applyMsg.CommandIndex,
+			applyMsg.Term}
 		entryIndex++
 	}
 
@@ -142,20 +153,6 @@ func (raft *Raft) sendAppendRequest(follower int, replyChan chan AppendEntriesRe
 	// step5: send AppendEntries rpc request
 	reply := AppendEntriesReply{FollowerPeerId:follower, EndIndex:latestIndex}
 	ok := raft.peers[follower].Call("Raft.LogAppend", &request, &reply)
-	retryCount := 0
-	for !ok && raft.isLeader() {
-		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 向server: %d 发送AppendRequest失败了",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower)
-		retryCount++
-		if retryCount >= 3 {
-			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 向server: %d 连续" +
-				"发送三次AppendRequest失败了",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower)
-			break
-		}
-		time.Sleep(time.Duration(100) * time.Millisecond)
-		ok = raft.peers[follower].Call("Raft.LogAppend", &request, &reply)
-	}
 	reply.SendOk = ok
 	replyChan <- reply
 }
@@ -179,12 +176,13 @@ func (raft *Raft) updateMatchIndex(follower int) {
 func (raft *Raft) doHeartbeatJob()  {
 	for raft.isStart && raft.isLeader() {
 		// send heartbeat to each follower
-		for index := range raft.peers {
-			if index == raft.me {
-				continue
-			}
-			go raft.sendHeartbeat(index)
-		}
+		//for index := range raft.peers {
+		//	if index == raft.me {
+		//		continue
+		//	}
+		//	go raft.sendHeartbeat(index)
+		//}
+		go raft.syncLogsToFollowers()
 		time.Sleep(HEARTBEAT_PERIOD)
 	}
 }
