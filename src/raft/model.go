@@ -11,8 +11,8 @@ type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
 	persister *Persister          // Object to hold this peer's persisted state\
-	applyCh            chan ApplyMsg
-	me        int                 // this peer's index into peers[]
+	applyCh   chan ApplyMsg
+	me        int // this peer's index into peers[]
 	// Your data here (2A, 2B, 2C).//todo
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
@@ -27,6 +27,7 @@ type Raft struct {
 	CurTermAndVotedFor CurTermAndVotedFor
 	CommitIndex        int
 	Logs               []ApplyMsg
+	stepDownNotifyCh   chan interface{}
 }
 
 func (raft *Raft) GetState() (int, bool) {
