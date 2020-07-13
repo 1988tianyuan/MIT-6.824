@@ -14,7 +14,6 @@ func (raft *Raft) Start(command interface{}) (int, int, bool) {
 		raft.LastLogIndex = index
 		raft.LastLogTerm = term
 		go raft.persist()
-		go raft.syncLogsToFollowers()
 	}
 	return index, term, raft.isLeader()
 }

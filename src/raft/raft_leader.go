@@ -36,7 +36,7 @@ func (raft *Raft) syncLogsToFollowers() {
 }
 
 /*
-	send append request to followers, from nextIndex to len(raft.Logs)
+	send append request RPC to followers, from nextIndex to LastLogIndex of this LEADER
 */
 func (raft *Raft) sendAppendRequest(follower int)  {
 	raft.mu.Lock()
@@ -108,7 +108,6 @@ func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int
 		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 无法将日志同步到server: %d, 需要更新matchIndex: %d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, endIndex)
 		raft.updateFollowerIndex(follower)	// refresh nextIndex of this follower
-		go raft.sendAppendRequest(follower)	// send RPC again after nextIndex is updated
 	}
 }
 
@@ -145,14 +144,14 @@ func (raft *Raft) checkCommit(endIndex int) {
 func (raft *Raft) updateFollowerIndex(follower int) {
 	nextIndex := raft.nextIndex[follower]
 	term := raft.Logs[nextIndex - 1].Term
-	updatedIndex := 0
+	updatedNextIndex := 0
 	for i := nextIndex - 2; i >= 0; i-- {
 		if raft.Logs[i].Term != term {
-			updatedIndex = i
+			updatedNextIndex = i
 			break
 		}
 	}
-	raft.nextIndex[follower] = updatedIndex + 1
+	raft.nextIndex[follower] = updatedNextIndex + 1
 }
 
 /*
