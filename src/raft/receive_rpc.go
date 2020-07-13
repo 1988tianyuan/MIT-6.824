@@ -139,7 +139,8 @@ func (raft *Raft) appendEntries(entries []AppendEntry, matchIndex int) int {
 func (raft *Raft) shouldAppendEntries(args *AppendEntriesArgs) (bool,int) {
 	logs := raft.Logs
 	index := len(logs) - 1
-	if index <= 0 {
+	if index <= 0 && args.PrevLogIndex == 0 {
+		// empty log
 		return true, 0
 	} else {
 		if args.PrevLogIndex < len(logs) {

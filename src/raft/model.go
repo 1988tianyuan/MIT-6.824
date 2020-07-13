@@ -21,13 +21,13 @@ type Raft struct {
 	lastHeartBeatTime  int64
 	leaderId           int
 	matchIndex         []int
+	nextIndex		   []int
 	lastApplied        int
 	LastLogIndex       int
 	LastLogTerm        int
 	CurTermAndVotedFor CurTermAndVotedFor
 	CommitIndex        int
 	Logs               []ApplyMsg
-	stepDownNotifyCh   chan interface{}
 }
 
 func (raft *Raft) GetState() (int, bool) {
