@@ -13,7 +13,7 @@ func (raft *Raft) Start(command interface{}) (int, int, bool) {
 		raft.Logs = append(raft.Logs, ApplyMsg{CommandValid: true, Term: term, CommandIndex: index, Command: command})
 		raft.LastLogIndex = index
 		raft.LastLogTerm = term
-		go raft.persist()
+		go raft.persistState()
 	}
 	return index, term, raft.isLeader()
 }

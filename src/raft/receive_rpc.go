@@ -39,9 +39,16 @@ func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			raft.CurTermAndVotedFor.CurrentTerm, raft.me, args.CandidateId, args.Term,
 			args.LastLogIndex, args.LastLogTerm, raft.LastLogIndex, raft.LastLogTerm)
 	}
-	go raft.persist()
+	go raft.persistState()
 }
 
+/*
+	grant if the candidate has newer log entry, in the raft paper:
+ 	If the logs have last entries with different terms, then
+	the log with the later term is more up-to-date. If the logs
+	end with the same term, then whichever log is longer (has bigger log index) is
+	more up-to-date
+*/
 func (raft *Raft) shouldGrant(args *RequestVoteArgs) bool {
 	recvLastLogIndex := args.LastLogIndex
 	recvLastLogTerm := args.LastLogTerm
@@ -73,7 +80,7 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 		raft.stepDown(recvTerm)
 		// refresh Term in reply
 		reply.Term = raft.CurTermAndVotedFor.CurrentTerm
-		go raft.persist()
+		go raft.persistState()
 	}
 	if !raft.isLeader() && raft.leaderId != args.LeaderId {
 		raft.leaderId = args.LeaderId
@@ -83,7 +90,7 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 		reply.Success = true
 		if len(args.Entries) > 0 {
 			matchIndex = raft.appendEntries(args.Entries, matchIndex)
-			go raft.persist()
+			go raft.persistState()
 		}
 	} else {
 		reply.Success = false
@@ -111,7 +118,7 @@ func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 		raft.CommitIndex = endIndex
 		log.Printf("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d, 最终matchIndex是:%d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.me, raft.CommitIndex, matchIndex)
-		go raft.persist()
+		go raft.persistState()
 	}
 }
 

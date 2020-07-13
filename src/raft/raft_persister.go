@@ -11,7 +11,7 @@ import (
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
 //
-func (raft *Raft) persist() {
+func (raft *Raft) persistState() {
 	buffer := new(bytes.Buffer)
 	encoder := labgob.NewEncoder(buffer)
 	err1 := encoder.Encode(raft.CurTermAndVotedFor)
@@ -27,7 +27,6 @@ func (raft *Raft) persist() {
 		raft.persister.SaveRaftState(data)
 	}
 }
-
 
 //
 // restore previously persisted state.
@@ -58,4 +57,8 @@ func (raft *Raft) readPersist(data []byte) {
 		raft.CommitIndex = CommitIndex
 		raft.Logs = Logs
 	}
+}
+
+func (raft *Raft) persistSnapshot () {
+
 }

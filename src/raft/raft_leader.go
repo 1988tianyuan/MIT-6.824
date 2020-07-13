@@ -126,7 +126,12 @@ func (raft *Raft) checkCommit(endIndex int) {
 			reachedServers++
 		}
 	}
-	if reachedServers >= threshold && endIndex > commitIndex {
+	// 判断需要将当前index进行commit的前提，来自raft论文：
+	// a leader cannot immediately conclude that an entry from a previous term is
+	// committed once it is stored on a majority of servers.
+	// 如果同步的log是来自之前的term，则不能立即commit
+	if reachedServers >= threshold && endIndex > commitIndex &&
+		raft.Logs[endIndex].Term == raft.CurTermAndVotedFor.CurrentTerm {
 		log.Printf("CheckCommit==> term: %d, raft-id: %d, index:%d 已经同步到 %d 个server, 最终commitIndex是: %d, 并提交状态机",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.me, endIndex, reachedServers, endIndex)
 		shouldCommitIndex := commitIndex + 1
@@ -137,7 +142,7 @@ func (raft *Raft) checkCommit(endIndex int) {
 			shouldCommitIndex++
 		}
 		raft.CommitIndex = endIndex		// refresh latest commitIndex
-		go raft.persist()
+		go raft.persistState()
 	}
 }
 
