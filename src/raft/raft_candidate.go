@@ -32,10 +32,10 @@ func (raft *Raft) sendRequestVote(server int, args *RequestVoteArgs, replyChan c
 	reply.Server = server
 	ok := raft.peers[server].Call("Raft.RequestVote", args, &reply)
 	if ok {
+		raft.mu.Lock()
+		defer raft.mu.Unlock()
 		replyTerm := reply.Term
 		if replyTerm > raft.CurTermAndVotedFor.CurrentTerm {
-			raft.mu.Lock()
-			defer raft.mu.Unlock()
 			raft.stepDown(replyTerm)
 			reply.HasStepDown = true
 		}
@@ -71,12 +71,13 @@ func (raft *Raft) beginLeaderElection(timeout time.Duration) {
 						raft.CurTermAndVotedFor.CurrentTerm, raft.me, reply.Server)
 					votes++
 				}
+				raft.mu.Lock()
 				if votes >= threshold && raft.isCandidate() {
-					raft.mu.Lock()
 					raft.changeToLeader(votes)
 					raft.mu.Unlock()
 					return
 				}
+				raft.mu.Unlock()
 			case <-timer:
 				return
 			}

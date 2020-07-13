@@ -35,23 +35,6 @@ func (raft *Raft) syncLogsToFollowers() {
 	}
 }
 
-func (raft *Raft) commitAndApply(endIndex int) {
-	raft.mu.Lock()
-	defer raft.mu.Unlock()
-	commitIndex := raft.CommitIndex
-	if raft.isLeader() && endIndex > commitIndex {
-		shouldCommitIndex := commitIndex + 1
-		for shouldCommitIndex <= endIndex {
-			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.me, shouldCommitIndex)
-			raft.applyCh <- raft.Logs[shouldCommitIndex]
-			shouldCommitIndex++
-		}
-		raft.CommitIndex = endIndex		// refresh latest commitIndex
-		go raft.persist()
-	}
-}
-
 /*
 	send append request to followers, from nextIndex to len(raft.Logs)
 */
@@ -81,7 +64,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 		}
 	}
 	// step3: init prevLogIndex as nextIndex - 1
-	prevLogIndex, prevLogTerm := raft.makePreParams(nextIndex - 1)
+	prevLogIndex, prevLogTerm := raft.makePreParams(nextIndex)
 	// step4: construct AppendEntriesArgs
 	request := AppendEntriesArgs{
 		raft.CurTermAndVotedFor.CurrentTerm,
@@ -97,29 +80,35 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 	// step6: begin RPC calling
 	ok := raft.peers[follower].Call("Raft.LogAppend", &request, &reply)
 	if ok {
-		raft.mu.Lock()
-		defer raft.mu.Unlock()
-		if reply.Term > raft.CurTermAndVotedFor.CurrentTerm {
-			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 的最新的term: %d, 降职为FOLLOWER",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, reply.Term)
-			raft.stepDown(reply.Term)
-			return
+		raft.handleAppendEntryResult(reply, follower)
+	}
+}
+
+func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int) {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
+	recvTerm := reply.Term
+	endIndex := reply.EndIndex
+	if recvTerm > raft.CurTermAndVotedFor.CurrentTerm {
+		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 的最新的term: %d, 降职为FOLLOWER",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, recvTerm)
+		raft.stepDown(recvTerm)
+		return
+	}
+	success := reply.Success
+	if success {
+		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 成功将日志同步到server: %d, 最终matchIndex是: %d",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, endIndex)
+		if raft.matchIndex[follower] < endIndex {
+			raft.matchIndex[follower] = endIndex
 		}
-		success := reply.Success
-		if success {
-			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 成功将日志同步到server: %d, 最终matchIndex是: %d",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, reply.EndIndex)
-			if raft.matchIndex[follower] < reply.EndIndex {
-				raft.matchIndex[follower] = reply.EndIndex
-			}
-			raft.nextIndex[follower] = reply.EndIndex + 1
-			go raft.checkCommit(reply.EndIndex)
-		} else {
-			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 无法将日志同步到server: %d, 需要更新matchIndex: %d",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, reply.EndIndex)
-			raft.updateFollowerIndex(follower)
-			go raft.sendAppendRequest(follower)
-		}
+		raft.nextIndex[follower] = endIndex + 1
+		go raft.checkCommit(endIndex)
+	} else {
+		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 无法将日志同步到server: %d, 需要更新matchIndex: %d",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, endIndex)
+		raft.updateFollowerIndex(follower)	// refresh nextIndex of this follower
+		go raft.sendAppendRequest(follower)	// send RPC again after nextIndex is updated
 	}
 }
 
@@ -194,11 +183,11 @@ func (raft *Raft) initFollowerIndex()  {
 	}
 }
 
-func (raft *Raft) makePreParams(matchIndex int) (int,int) {
+func (raft *Raft) makePreParams(nextIndex int) (int,int) {
 	if len(raft.Logs) <= 0 {
 		return 0, 0
 	} else {
-		return matchIndex, raft.Logs[matchIndex].Term
+		return nextIndex - 1, raft.Logs[nextIndex - 1].Term
 	}
 }
 
