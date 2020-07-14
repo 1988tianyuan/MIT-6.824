@@ -105,8 +105,8 @@ func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int
 		raft.nextIndex[follower] = endIndex + 1
 		go raft.checkCommit(endIndex)
 	} else {
-		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 无法将日志同步到server: %d, 需要更新matchIndex: %d",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, endIndex)
+		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 无法将日志同步到server: %d, 需要更新这个nextIndex: %d",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, raft.nextIndex[follower])
 		raft.updateFollowerIndex(follower)	// refresh nextIndex of this follower
 	}
 }

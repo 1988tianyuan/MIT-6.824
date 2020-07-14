@@ -85,16 +85,12 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 	if !raft.isLeader() && raft.leaderId != args.LeaderId {
 		raft.leaderId = args.LeaderId
 	}
-	shouldAppend, matchIndex := raft.shouldAppendEntries(args)
-	if shouldAppend {
-		reply.Success = true
-		if len(args.Entries) > 0 {
-			matchIndex = raft.appendEntries(args.Entries, matchIndex)
-			go raft.persistState()
-		}
-	} else {
-		reply.Success = false
+	success, matchIndex := raft.logConsistencyCheck(args)
+	if success && len(args.Entries) > 0 {
+		matchIndex = raft.appendEntries(args.Entries, matchIndex)
+		go raft.persistState()
 	}
+	reply.Success = success
 	go raft.doCommit(args.CommitIndex, matchIndex)
 }
 
@@ -125,25 +121,23 @@ func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 func (raft *Raft) appendEntries(entries []AppendEntry, matchIndex int) int {
 	log.Printf("LogAppend: term: %d, raft-id: %d, 开始append，当前matchIndex是%d",
 		raft.CurTermAndVotedFor.CurrentTerm, raft.me, matchIndex)
-	currentIndex := matchIndex + 1
 	term := raft.CurTermAndVotedFor.CurrentTerm
+	if matchIndex != raft.LastLogIndex {
+		raft.Logs = raft.Logs[0:matchIndex + 1]
+	}
 	for _, entry := range entries {
-		item := ApplyMsg{CommandValid:true, CommandIndex:currentIndex, Term:entry.Term, Command:entry.Command}
-		if currentIndex < len(raft.Logs) {
-			raft.Logs[currentIndex] = item
-		} else {
-			raft.Logs = append(raft.Logs, item)
-		}
-		currentIndex++
+		matchIndex++
+		item := ApplyMsg{CommandValid:true, CommandIndex:matchIndex, Term:entry.Term, Command:entry.Command}
+		raft.Logs = append(raft.Logs, item)
 	}
 	raft.LastLogIndex = len(raft.Logs) - 1
 	raft.LastLogTerm = term
 	log.Printf("LogAppend: term: %d, raft-id: %d, 结束append，最后matchIndex是%d",
-		raft.CurTermAndVotedFor.CurrentTerm, raft.me, currentIndex - 1)
-	return currentIndex - 1
+		raft.CurTermAndVotedFor.CurrentTerm, raft.me, matchIndex)
+	return matchIndex
 }
 
-func (raft *Raft) shouldAppendEntries(args *AppendEntriesArgs) (bool,int) {
+func (raft *Raft) logConsistencyCheck(args *AppendEntriesArgs) (bool,int) {
 	logs := raft.Logs
 	index := len(logs) - 1
 	if index <= 0 && args.PrevLogIndex == 0 {

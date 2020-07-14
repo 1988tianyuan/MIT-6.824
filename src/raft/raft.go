@@ -30,6 +30,8 @@ func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan 
 	if len(raft.Logs) == 0 {
 		raft.Logs = make([] ApplyMsg, 0)
 		raft.Logs = append(raft.Logs, ApplyMsg{CommandIndex: 0, CommandValid:false}) // init empty log for index=0
+		raft.LastLogIndex = len(raft.Logs) - 1
+		raft.LastLogTerm = -1
 	}
 	go raft.doFollowerJob()
 	return raft
