@@ -87,6 +87,9 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int) {
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
+	if !raft.isLeader() {
+		return
+	}
 	recvTerm := reply.Term
 	endIndex := reply.EndIndex
 	if recvTerm > raft.CurTermAndVotedFor.CurrentTerm {
