@@ -80,3 +80,9 @@ type ApplyMsg struct {
 	CommandIndex int
 	Term 		 int
 }
+
+type SnapShot struct {
+	LastIncludedIndex int
+	LastIncludedTerm  int
+	Command   interface{}
+}
