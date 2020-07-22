@@ -6,84 +6,53 @@ import (
 	"log"
 	"raft"
 	"strings"
-	"sync"
 	"time"
 )
 
 const Debug = 0
 
-
-type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
-}
-
-type KVServer struct {
-	mu           sync.Mutex
-	me           int
-	rf           *raft.Raft
-	applyCh      chan raft.ApplyMsg
-	KvMap        map[string]string
-	maxraftstate int // snapshot if log grows this big
-	AppliedIndex int
-	AppliedTerm  int
-	persister    *raft.Persister
-	// Your definitions here.
-}
-
-
-func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
+func (kv *KVServer) startRaft(op Operation, key string, value string, reply *CommonReply) {
 	rf := kv.rf
-	reply.CurrentServer = rf.Me
 	if !rf.IsLeader() {
 		reply.WrongLeader = true
 		return
 	}
-	key := args.Key
-	curIndex, cruTerm, isLeader := rf.Start(genCommand("Get", key, ""))
+	curIndex, curTerm, isLeader := rf.Start(genCommand(op, key, value))
 	if !isLeader {
 		reply.WrongLeader = true
 	} else {
-		for kv.AppliedIndex < curIndex || kv.AppliedTerm < cruTerm {
+		timeout := time.Now().Add(1 * time.Second)
+		for !rf.CheckCommittedIndexAndTerm(curIndex, curTerm) {
 			time.Sleep(time.Duration(100) * time.Millisecond)
+			if time.Now().After(timeout) {
+				break
+			}
 		}
-	}
-	reply.Value = kv.KvMap[key]
-}
-
-func (kv *KVServer) tryKVStore(op string, args *PutAppendArgs, reply *PutAppendReply)  {
-	key := args.Key
-	value := args.Value
-	rf := kv.rf
-	curIndex, cruTerm, isLeader := rf.Start(genCommand(op, key, value))
-	if !isLeader {
-		reply.WrongLeader = true
-		reply.LeaderIndex = rf.LeaderId
-	} else {
-		for kv.AppliedIndex < curIndex || kv.AppliedTerm < cruTerm {
-			time.Sleep(time.Duration(100) * time.Millisecond)
-		}
-		if !rf.CheckCommittedIndexAndTerm(curIndex, cruTerm) {
-			reply.Err = "failed to update value, please try again."
+		if !rf.CheckCommittedIndexAndTerm(curIndex, curTerm) {
+			reply.Err = "failed to execute request, please try again."
+		} else {
+			reply.Content = kv.KvMap[key]
 		}
 	}
 }
 
-func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	reply.LeaderIndex = kv.rf.LeaderId
+func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *CommonReply) {
 	log.Printf("PutAppend: 收到PutAppend, args是:%v, 当前的server是:%d", args, kv.rf.Me)
-	if !kv.rf.IsLeader() {
-		reply.WrongLeader = true
-		return
-	}
-	reply.WrongLeader = false
 	op := args.Op
-	if op != "Put" && op != "Append" {
+	if op != PUT && op != APPEND {
 		reply.Err = "Wrong op, should be one of these op: Put | Append."
 	} else {
-		kv.tryKVStore(op, args, reply)
+		kv.tryPutOrAppend(op, args, reply)
 	}
+}
+
+func (kv *KVServer) Get(args *GetArgs, reply *CommonReply) {
+	kv.startRaft(GET, args.Key, "", reply)
+}
+
+func (kv *KVServer) tryPutOrAppend(op Operation, args *PutAppendArgs, reply *CommonReply)  {
+	value := args.Value
+	kv.startRaft(op, args.Key, value, reply)
 }
 
 //
@@ -127,7 +96,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 		kv.KvMap = make(map[string]string)
 	}
 	go kv.loopApply()
-
 	return kv
 }
 
@@ -136,7 +104,6 @@ func (kv *KVServer) loopApply() {
 		select {
 		case apply := <- kv.applyCh:
 			kv.mu.Lock()
-			kv.updateAppliedInfo(apply)
 			if apply.CommandValid {
 				kv.applyKVStore(apply.Command.(string))
 			}
@@ -152,19 +119,14 @@ func (kv *KVServer) applyKVStore(command string) {
 	key := s[1]
 	value := s[2]
 	switch op {
-	case "Put":
+	case string(PUT):
 		kv.KvMap[key] = value
 		break
-	case "Append":
+	case string(APPEND):
 		oldValue := kv.KvMap[key]
 		if !strings.Contains(oldValue, value) {
 			kv.KvMap[key] = oldValue + value
 		}
 		break
 	}
-}
-
-func (kv *KVServer) updateAppliedInfo(apply raft.ApplyMsg)  {
-	kv.AppliedIndex = apply.CommandIndex
-	kv.AppliedTerm = apply.Term
 }

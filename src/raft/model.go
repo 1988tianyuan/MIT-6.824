@@ -12,20 +12,24 @@ type Raft struct {
 	peers              []*labrpc.ClientEnd // RPC end points of all peers
 	persister          *Persister          // Object to hold this peer's persisted state\
 	applyCh            chan ApplyMsg
-	Me                 int // this peer's index into peers[]
 	state              State
-	IsStart            bool
 	lastHeartBeatTime  int64
-	LeaderId           int
 	matchIndex         []int
 	nextIndex          []int
 	lastApplied        int
+
+	// public properties, need persisted
 	LastLogIndex       int
 	LastLogTerm        int
 	CurTermAndVotedFor CurTermAndVotedFor
 	CommitIndex        int
 	Logs               []ApplyMsg
+
+	// other public properties
 	UseDummyLog		   bool
+	LeaderId           int
+	Me                 int // this peer's index into peers[]
+	IsStart            bool
 }
 
 func (raft *Raft) GetState() (int, bool) {
