@@ -6,12 +6,12 @@ import (
 )
 
 func (raft *Raft) doCandidateJob() {
-	for raft.isStart && !raft.isLeader() {
+	for raft.IsStart && !raft.IsLeader() {
 		raft.mu.Lock()
 		raft.state = CANDIDATE
 		currentTerm := raft.CurTermAndVotedFor.CurrentTerm
 		raft.CurTermAndVotedFor =
-			CurTermAndVotedFor{CurrentTerm: currentTerm + 1, VotedFor:raft.me} // increment term and vote for self
+			CurTermAndVotedFor{CurrentTerm: currentTerm + 1, VotedFor:raft.Me} // increment term and vote for self
 		timeout := makeRandomTimeout(300, CANDIDATE_TIMEOUT_RANGE)             // random election timeout
 		go raft.persistState()
 		go raft.beginLeaderElection(timeout)
@@ -19,7 +19,7 @@ func (raft *Raft) doCandidateJob() {
 		time.Sleep(timeout)
 		if raft.isCandidate() {		// election timeout
 			log.Printf("DoCandidateJob==> term: %d, raft-id: %d, 选举超时, 重新开始选举",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.me)
+				raft.CurTermAndVotedFor.CurrentTerm, raft.Me)
 		} else {
 			break
 		}
@@ -48,12 +48,12 @@ func (raft *Raft) beginLeaderElection(timeout time.Duration) {
 		replyChan := make(chan RequestVoteReply, len(raft.peers) - 1)  // channel for receive async vote request
 		args := &RequestVoteArgs{
 			Term:raft.CurTermAndVotedFor.CurrentTerm,
-			CandidateId:raft.me,
+			CandidateId:raft.Me,
 			LastLogTerm:raft.LastLogTerm,
 			LastLogIndex:raft.LastLogIndex}
 		votes := 1
 		for server := range raft.peers {
-			if server == raft.me {
+			if server == raft.Me {
 				continue
 			}
 			go raft.sendRequestVote(server, args, replyChan)
@@ -68,7 +68,7 @@ func (raft *Raft) beginLeaderElection(timeout time.Duration) {
 				}
 				if reply.VoteGranted {
 					log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 从raft:%d 处获得1票",
-						raft.CurTermAndVotedFor.CurrentTerm, raft.me, reply.Server)
+						raft.CurTermAndVotedFor.CurrentTerm, raft.Me, reply.Server)
 					votes++
 				}
 				raft.mu.Lock()

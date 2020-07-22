@@ -8,7 +8,7 @@ import (
 func (raft *Raft) changeToLeader(votes int)  {
 	raft.state = LEADER
 	log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票",
-		raft.CurTermAndVotedFor.CurrentTerm, raft.me, votes)
+		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, votes)
 	go raft.doLeaderJob()
 }
 
@@ -24,11 +24,11 @@ func (raft *Raft) doLeaderJob()  {
 	sync leader's Logs to followers
 */
 func (raft *Raft) syncLogsToFollowers() {
-	if !raft.isLeader() {
+	if !raft.IsLeader() {
 		return
 	}
 	for follower := range raft.peers {
-		if follower == raft.me {
+		if follower == raft.Me {
 			continue
 		}
 		go raft.sendAppendRequest(follower)
@@ -40,7 +40,7 @@ func (raft *Raft) syncLogsToFollowers() {
 */
 func (raft *Raft) sendAppendRequest(follower int)  {
 	raft.mu.Lock()
-	if !raft.isLeader() {
+	if !raft.IsLeader() {
 		raft.mu.Unlock()
 		return
 	}
@@ -50,7 +50,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 	matchIndex := raft.matchIndex[follower]
 	log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 开始向server: %d 发送AppendRequest, " +
 		"matchIndex是: %d, nextIndex是 :%d",
-		raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, matchIndex, nextIndex)
+		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, matchIndex, nextIndex)
 	// step2: construct entries, range is from nextIndex to latestIndex
 	var entries []AppendEntry
 	if latestIndex >= nextIndex {
@@ -59,7 +59,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 		for i := nextIndex; i <= latestIndex; i++ {
 			applyMsg := raft.Logs[i]
 			entries[entryIndex] = AppendEntry{applyMsg.Command, applyMsg.CommandIndex,
-				applyMsg.Term}
+				applyMsg.CommandValid, applyMsg.Term}
 			entryIndex++
 		}
 	}
@@ -68,7 +68,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 	// step4: construct AppendEntriesArgs
 	request := AppendEntriesArgs{
 		raft.CurTermAndVotedFor.CurrentTerm,
-		raft.me,
+		raft.Me,
 		prevLogIndex,
 		prevLogTerm,
 		entries,
@@ -87,21 +87,21 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int) {
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
-	if !raft.isLeader() {
+	if !raft.IsLeader() {
 		return
 	}
 	recvTerm := reply.Term
 	endIndex := reply.EndIndex
 	if recvTerm > raft.CurTermAndVotedFor.CurrentTerm {
 		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 的最新的term: %d, 降职为FOLLOWER",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, recvTerm)
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, recvTerm)
 		raft.stepDown(recvTerm)
 		return
 	}
 	success := reply.Success
 	if success {
 		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 成功将日志同步到server: %d, 最终matchIndex是: %d",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, endIndex)
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, endIndex)
 		if raft.matchIndex[follower] < endIndex {
 			raft.matchIndex[follower] = endIndex
 		}
@@ -109,7 +109,7 @@ func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int
 		go raft.checkCommit(endIndex)
 	} else {
 		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 无法将日志同步到server: %d, 需要更新这个nextIndex: %d",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, follower, raft.nextIndex[follower])
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, raft.nextIndex[follower])
 		raft.updateFollowerIndex(follower)	// refresh nextIndex of this follower
 	}
 }
@@ -121,7 +121,7 @@ func (raft *Raft) checkCommit(endIndex int) {
 	commitIndex := raft.CommitIndex
 	reachedServers := 1
 	for index := range raft.peers {
-		if index == raft.me {
+		if index == raft.Me {
 			continue
 		}
 		matchIndex := raft.matchIndex[index]
@@ -136,11 +136,11 @@ func (raft *Raft) checkCommit(endIndex int) {
 	if reachedServers >= threshold && endIndex > commitIndex &&
 		raft.Logs[endIndex].Term == raft.CurTermAndVotedFor.CurrentTerm {
 		log.Printf("CheckCommit==> term: %d, raft-id: %d, index:%d 已经同步到 %d 个server, 最终commitIndex是: %d, 并提交状态机",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, endIndex, reachedServers, endIndex)
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, endIndex, reachedServers, endIndex)
 		shouldCommitIndex := commitIndex + 1
 		for shouldCommitIndex <= endIndex {
 			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.me, shouldCommitIndex)
+				raft.CurTermAndVotedFor.CurrentTerm, raft.Me, shouldCommitIndex)
 			raft.applyCh <- raft.Logs[shouldCommitIndex]
 			shouldCommitIndex++
 		}
@@ -166,7 +166,7 @@ func (raft *Raft) updateFollowerIndex(follower int) {
 	for LEADER sending heartbeat to each FOLLOWER
 */
 func (raft *Raft) doHeartbeatJob()  {
-	for raft.isStart && raft.isLeader() {
+	for raft.IsStart && raft.IsLeader() {
 		go raft.syncLogsToFollowers()
 		time.Sleep(HEARTBEAT_PERIOD)
 	}
@@ -179,10 +179,14 @@ func (raft *Raft) doHeartbeatJob()  {
 func (raft *Raft) initFollowerIndex()  {
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
+	raft.LeaderId = raft.Me
 	raft.matchIndex = make([]int, len(raft.peers))
 	raft.nextIndex = make([]int, len(raft.peers))
+	if raft.UseDummyLog {
+		raft.internalStart("", false)
+	}
 	for server := range raft.peers {
-		if server == raft.me {
+		if server == raft.Me {
 			continue
 		}
 		raft.matchIndex[server] = 0

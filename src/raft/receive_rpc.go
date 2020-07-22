@@ -10,14 +10,14 @@ func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	recvTerm := args.Term
 	candidateId := args.CandidateId
 	log.Printf("RequestVote==> term: %d, raft-id: %d, 当前votedFor是%v, 给raft-id:%d投票，它的term是:%d",
-		raft.CurTermAndVotedFor.CurrentTerm, raft.me, raft.CurTermAndVotedFor.VotedFor, args.CandidateId, args.Term)
+		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, raft.CurTermAndVotedFor.VotedFor, args.CandidateId, args.Term)
 	reply.VoteGranted = false
 	reply.Term = raft.CurTermAndVotedFor.CurrentTerm
 
 	// received term is smaller, reject this request and send back CurrentTerm
 	if recvTerm < raft.CurTermAndVotedFor.CurrentTerm {
 		log.Printf("RequestVote==> term: %d, raft-id: %d, 给raft-id:%d投反对票, 它的term是:%d",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, args.CandidateId, args.Term)
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, args.CandidateId, args.Term)
 		return
 	}
 	// received is bigger, step to FOLLOWER
@@ -29,14 +29,14 @@ func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		raft.lastHeartBeatTime = currentTimeMillis()
 		// if haven't voted in CurrentTerm, do voteGranted and set VotedFor as the candidateId
 		log.Printf("RequestVote==> term: %d, raft-id: %d, 给raft-id:%d 投赞成票，它的term是:%d",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, args.CandidateId, args.Term)
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, args.CandidateId, args.Term)
 		raft.CurTermAndVotedFor.VotedFor = candidateId
 		reply.VoteGranted = true
 		reply.Term = recvTerm
 	} else {
 		log.Printf("RequestVote==> term: %d, raft-id: %d, 给raft-id:%d 投反对票，它的term是:%d, " +
 			"它的lastLogIndex是:%d, 它的lastLogTerm是:%d, 而我的lastLogIndex是:%d, 我的lastLogTerm是:%d",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, args.CandidateId, args.Term,
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, args.CandidateId, args.Term,
 			args.LastLogIndex, args.LastLogTerm, raft.LastLogIndex, raft.LastLogTerm)
 	}
 	go raft.persistState()
@@ -68,7 +68,7 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 	recvTerm := args.Term
 	reply.Term = raft.CurTermAndVotedFor.CurrentTerm
 	if raft.CurTermAndVotedFor.CurrentTerm > recvTerm {
-		log.Printf("LogAppend: raft-id: %d, 拒绝这次append，recvTerm是:%d, 而我的term是:%d", raft.me, recvTerm,
+		log.Printf("LogAppend: raft-id: %d, 拒绝这次append，recvTerm是:%d, 而我的term是:%d", raft.Me, recvTerm,
 			raft.CurTermAndVotedFor.CurrentTerm)
 		reply.Success = false
 		return
@@ -82,8 +82,8 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 		reply.Term = raft.CurTermAndVotedFor.CurrentTerm
 		go raft.persistState()
 	}
-	if !raft.isLeader() && raft.leaderId != args.LeaderId {
-		raft.leaderId = args.LeaderId
+	if !raft.IsLeader() && raft.LeaderId != args.LeaderId {
+		raft.LeaderId = args.LeaderId
 	}
 	success, matchIndex := raft.logConsistencyCheck(args)
 	if success && len(args.Entries) > 0 {
@@ -107,33 +107,33 @@ func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 		shouldCommitIndex := raft.CommitIndex + 1
 		for shouldCommitIndex <= endIndex {
 			log.Printf("LogAppend: term: %d, raft-id: %d, 将index:%d 提交到状态机",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.me, shouldCommitIndex)
+				raft.CurTermAndVotedFor.CurrentTerm, raft.Me, shouldCommitIndex)
 			raft.applyCh <- raft.Logs[shouldCommitIndex]
 			shouldCommitIndex++
 		}
 		raft.CommitIndex = endIndex
 		log.Printf("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d, 最终matchIndex是:%d",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, raft.CommitIndex, matchIndex)
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, raft.CommitIndex, matchIndex)
 		go raft.persistState()
 	}
 }
 
 func (raft *Raft) appendEntries(entries []AppendEntry, matchIndex int) int {
 	log.Printf("LogAppend: term: %d, raft-id: %d, 开始append，当前matchIndex是%d",
-		raft.CurTermAndVotedFor.CurrentTerm, raft.me, matchIndex)
+		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, matchIndex)
 	term := raft.CurTermAndVotedFor.CurrentTerm
 	if matchIndex != raft.LastLogIndex {
 		raft.Logs = raft.Logs[0:matchIndex + 1]
 	}
 	for _, entry := range entries {
 		matchIndex++
-		item := ApplyMsg{CommandValid:true, CommandIndex:matchIndex, Term:entry.Term, Command:entry.Command}
+		item := ApplyMsg{CommandValid:entry.CommandValid, CommandIndex:matchIndex, Term:entry.Term, Command:entry.Command}
 		raft.Logs = append(raft.Logs, item)
 	}
 	raft.LastLogIndex = len(raft.Logs) - 1
 	raft.LastLogTerm = term
 	log.Printf("LogAppend: term: %d, raft-id: %d, 结束append，最后matchIndex是%d",
-		raft.CurTermAndVotedFor.CurrentTerm, raft.me, matchIndex)
+		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, matchIndex)
 	return matchIndex
 }
 

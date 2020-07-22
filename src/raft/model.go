@@ -8,27 +8,28 @@ import (
 type State string
 
 type Raft struct {
-	mu        sync.Mutex          // Lock to protect shared access to this peer's state
-	peers     []*labrpc.ClientEnd // RPC end points of all peers
-	persister *Persister          // Object to hold this peer's persisted state\
-	applyCh   chan ApplyMsg
-	me        int // this peer's index into peers[]
+	mu                 sync.Mutex          // Lock to protect shared access to this peer's state
+	peers              []*labrpc.ClientEnd // RPC end points of all peers
+	persister          *Persister          // Object to hold this peer's persisted state\
+	applyCh            chan ApplyMsg
+	Me                 int // this peer's index into peers[]
 	state              State
-	isStart            bool
+	IsStart            bool
 	lastHeartBeatTime  int64
-	leaderId           int
+	LeaderId           int
 	matchIndex         []int
-	nextIndex		   []int
+	nextIndex          []int
 	lastApplied        int
 	LastLogIndex       int
 	LastLogTerm        int
 	CurTermAndVotedFor CurTermAndVotedFor
 	CommitIndex        int
 	Logs               []ApplyMsg
+	UseDummyLog		   bool
 }
 
 func (raft *Raft) GetState() (int, bool) {
-	return raft.CurTermAndVotedFor.CurrentTerm, raft.isLeader()
+	return raft.CurTermAndVotedFor.CurrentTerm, raft.IsLeader()
 }
 
 type CurTermAndVotedFor struct {
@@ -56,6 +57,7 @@ type AppendEntriesArgs struct {
 type AppendEntry struct {
 	Command      interface{}
 	CommandIndex int
+	CommandValid bool
 	Term 		 int
 }
 

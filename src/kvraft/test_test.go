@@ -6,7 +6,6 @@ import "testing"
 import "strconv"
 import "time"
 import "math/rand"
-import "log"
 import "strings"
 import "sync"
 import "sync/atomic"
@@ -211,7 +210,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 					// log.Printf("%d: client new get %v\n", cli, key)
 					v := Get(cfg, myck, key)
 					if v != last {
-						log.Fatalf("get wrong value, key %v, wanted:\n%v\n, got\n%v\n", key, last, v)
+						t.Fatalf("get wrong value, key %v, wanted:\n%v\n, got\n%v\n", key, last, v)
 					}
 				}
 			}

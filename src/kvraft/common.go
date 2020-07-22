@@ -20,6 +20,7 @@ type PutAppendArgs struct {
 type PutAppendReply struct {
 	WrongLeader bool
 	Err         Err
+	LeaderIndex int
 }
 
 type GetArgs struct {
@@ -31,4 +32,9 @@ type GetReply struct {
 	WrongLeader bool
 	Err         Err
 	Value       string
+	CurrentServer int
+}
+
+func genCommand(op string, key string, value string) string {
+	return op + "," + key + "," + value
 }

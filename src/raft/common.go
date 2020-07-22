@@ -16,14 +16,14 @@ const (
 )
 
 func (raft *Raft) Kill() {
-	raft.isStart = false
+	raft.IsStart = false
 }
 
 func (raft *Raft) isFollower() bool {
 	return raft.state == FOLLOWER
 }
 
-func (raft *Raft) isLeader() bool {
+func (raft *Raft) IsLeader() bool {
 	return raft.state == LEADER
 }
 
@@ -36,7 +36,7 @@ func (raft *Raft) stepDown(term int)  {
 	raft.CurTermAndVotedFor = CurTermAndVotedFor{CurrentTerm: term, VotedFor:-1}
 	if !raft.isFollower() {
 		log.Printf("StepDown==> term: %d, raft-id: %d, 收到最新的term: %d, 降职为FOLLOWER",
-			raft.CurTermAndVotedFor.CurrentTerm, raft.me, term)
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, term)
 		raft.state = FOLLOWER
 		go raft.doFollowerJob()
 	}

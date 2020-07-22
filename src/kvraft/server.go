@@ -5,17 +5,12 @@ import (
 	"labrpc"
 	"log"
 	"raft"
+	"strings"
 	"sync"
+	"time"
 )
 
 const Debug = 0
-
-func DPrintf(format string, a ...interface{}) (n int, err error) {
-	if Debug > 0 {
-		log.Printf(format, a...)
-	}
-	return
-}
 
 
 type Op struct {
@@ -25,23 +20,70 @@ type Op struct {
 }
 
 type KVServer struct {
-	mu      sync.Mutex
-	me      int
-	rf      *raft.Raft
-	applyCh chan raft.ApplyMsg
-
+	mu           sync.Mutex
+	me           int
+	rf           *raft.Raft
+	applyCh      chan raft.ApplyMsg
+	KvMap        map[string]string
 	maxraftstate int // snapshot if log grows this big
-
+	AppliedIndex int
+	AppliedTerm  int
+	persister    *raft.Persister
 	// Your definitions here.
 }
 
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
+	rf := kv.rf
+	reply.CurrentServer = rf.Me
+	if !rf.IsLeader() {
+		reply.WrongLeader = true
+		return
+	}
+	key := args.Key
+	curIndex, cruTerm, isLeader := rf.Start(genCommand("Get", key, ""))
+	if !isLeader {
+		reply.WrongLeader = true
+	} else {
+		for kv.AppliedIndex < curIndex || kv.AppliedTerm < cruTerm {
+			time.Sleep(time.Duration(100) * time.Millisecond)
+		}
+	}
+	reply.Value = kv.KvMap[key]
+}
+
+func (kv *KVServer) tryKVStore(op string, args *PutAppendArgs, reply *PutAppendReply)  {
+	key := args.Key
+	value := args.Value
+	rf := kv.rf
+	curIndex, cruTerm, isLeader := rf.Start(genCommand(op, key, value))
+	if !isLeader {
+		reply.WrongLeader = true
+		reply.LeaderIndex = rf.LeaderId
+	} else {
+		for kv.AppliedIndex < curIndex || kv.AppliedTerm < cruTerm {
+			time.Sleep(time.Duration(100) * time.Millisecond)
+		}
+		if !rf.CheckCommittedIndexAndTerm(curIndex, cruTerm) {
+			reply.Err = "failed to update value, please try again."
+		}
+	}
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+	reply.LeaderIndex = kv.rf.LeaderId
+	log.Printf("PutAppend: 收到PutAppend, args是:%v, 当前的server是:%d", args, kv.rf.Me)
+	if !kv.rf.IsLeader() {
+		reply.WrongLeader = true
+		return
+	}
+	reply.WrongLeader = false
+	op := args.Op
+	if op != "Put" && op != "Append" {
+		reply.Err = "Wrong op, should be one of these op: Put | Append."
+	} else {
+		kv.tryKVStore(op, args, reply)
+	}
 }
 
 //
@@ -77,13 +119,52 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv := new(KVServer)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
-
-	// You may need initialization code here.
-
 	kv.applyCh = make(chan raft.ApplyMsg)
-	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-
-	// You may need initialization code here.
+	kv.persister = persister
+	kv.readPersistedStore()
+	kv.rf = raft.ExtensionMake(servers, me, persister, kv.applyCh, true)
+	if kv.KvMap == nil {
+		kv.KvMap = make(map[string]string)
+	}
+	go kv.loopApply()
 
 	return kv
+}
+
+func (kv *KVServer) loopApply() {
+	for kv.rf.IsStart {
+		select {
+		case apply := <- kv.applyCh:
+			kv.mu.Lock()
+			kv.updateAppliedInfo(apply)
+			if apply.CommandValid {
+				kv.applyKVStore(apply.Command.(string))
+			}
+			kv.persistStore()
+			kv.mu.Unlock()
+		}
+	}
+}
+
+func (kv *KVServer) applyKVStore(command string) {
+	s := strings.Split(command, ",")
+	op := s[0]
+	key := s[1]
+	value := s[2]
+	switch op {
+	case "Put":
+		kv.KvMap[key] = value
+		break
+	case "Append":
+		oldValue := kv.KvMap[key]
+		if !strings.Contains(oldValue, value) {
+			kv.KvMap[key] = oldValue + value
+		}
+		break
+	}
+}
+
+func (kv *KVServer) updateAppliedInfo(apply raft.ApplyMsg)  {
+	kv.AppliedIndex = apply.CommandIndex
+	kv.AppliedTerm = apply.Term
 }
