@@ -1,6 +1,8 @@
 package raftkv
 
 import (
+	cryptoRand "crypto/rand"
+	"math/big"
 	"raft"
 	"sync"
 )
@@ -20,6 +22,8 @@ type PutAppendArgs struct {
 	Key   string
 	Value string
 	Op    Operation // "Put" or "Append"
+	RequestSeq  int64
+	ClientId	int64
 }
 
 type GetArgs struct {
@@ -32,14 +36,16 @@ type CommonReply struct {
 	Content     interface{}
 }
 
-func genCommand(op Operation, key string, value string) string {
-	return string(op) + "," + key + "," + value
+func genCommand(op Operation, key string, value string, clientId int64, requestSeq int64) KVCommand {
+	return KVCommand{op, key, value, clientId, requestSeq}
 }
 
-type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+type KVCommand struct {
+	Operation Operation
+	Key 	  string
+	Value     string
+	ClientId  int64
+	RequestSeq int64
 }
 
 type KVServer struct {
@@ -47,8 +53,19 @@ type KVServer struct {
 	me           int
 	rf           *raft.Raft
 	applyCh      chan raft.ApplyMsg
-	KvMap        map[string]string
 	maxraftstate int // snapshot if log grows this big
 	persister    *raft.Persister
-	// Your definitions here.
+
+	// public properties to persist
+	KvMap        map[string]string
+	ClientReqSeqMap map[int64]int64
+	LastAppliedIndex int
+	LastAppliedTerm int
+}
+
+func nrand() int64 {
+	max := big.NewInt(int64(1) << 62)
+	bigx, _ := cryptoRand.Int(cryptoRand.Reader, max)
+	x := bigx.Int64()
+	return x
 }

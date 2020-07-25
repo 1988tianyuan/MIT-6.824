@@ -5,54 +5,62 @@ import (
 	"labrpc"
 	"log"
 	"raft"
-	"strings"
 	"time"
 )
 
 const Debug = 0
 
-func (kv *KVServer) startRaft(op Operation, key string, value string, reply *CommonReply) {
+func (kv *KVServer) startRaft(op Operation, key string, value string, reply *CommonReply, isRead bool,
+	clientId int64, requestSeq int64) {
 	rf := kv.rf
-	if !rf.IsLeader() {
-		reply.WrongLeader = true
-		return
-	}
-	curIndex, curTerm, isLeader := rf.Start(genCommand(op, key, value))
+	curIndex, curTerm, isLeader := rf.Start(genCommand(op, key, value, clientId, requestSeq))
 	if !isLeader {
 		reply.WrongLeader = true
 	} else {
-		timeout := time.Now().Add(1 * time.Second)
-		for !rf.CheckCommittedIndexAndTerm(curIndex, curTerm) {
-			time.Sleep(time.Duration(100) * time.Millisecond)
-			if time.Now().After(timeout) {
-				break
+		for !kv.isApplied(curIndex, curTerm) {
+			if !rf.IsLeader() {
+				reply.WrongLeader = true
+				return
 			}
+			time.Sleep(time.Duration(100) * time.Millisecond)
+		}
+		if isRead {
+			reply.Content = kv.KvMap[key]
 		}
 		if !rf.CheckCommittedIndexAndTerm(curIndex, curTerm) {
 			reply.Err = "failed to execute request, please try again."
-		} else {
-			reply.Content = kv.KvMap[key]
 		}
 	}
 }
 
+func (kv *KVServer) isApplied(index int, term int) bool {
+	return kv.LastAppliedIndex >= index && kv.LastAppliedTerm >= term
+}
+
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *CommonReply) {
+	if !kv.rf.IsLeader() {
+		reply.WrongLeader = true
+		return
+	}
 	log.Printf("PutAppend: 收到PutAppend, args是:%v, 当前的server是:%d", args, kv.rf.Me)
 	op := args.Op
 	if op != PUT && op != APPEND {
 		reply.Err = "Wrong op, should be one of these op: Put | Append."
 	} else {
-		kv.tryPutOrAppend(op, args, reply)
+		if kv.ClientReqSeqMap[args.ClientId] >= args.RequestSeq {
+			return
+		}
+		value := args.Value
+		kv.startRaft(op, args.Key, value, reply, false, args.ClientId, args.RequestSeq)
 	}
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *CommonReply) {
-	kv.startRaft(GET, args.Key, "", reply)
-}
-
-func (kv *KVServer) tryPutOrAppend(op Operation, args *PutAppendArgs, reply *CommonReply)  {
-	value := args.Value
-	kv.startRaft(op, args.Key, value, reply)
+	if !kv.rf.IsLeader() {
+		reply.WrongLeader = true
+		return
+	}
+	kv.startRaft(GET, args.Key, "", reply, true, 0, 0)
 }
 
 //
@@ -83,7 +91,7 @@ func (kv *KVServer) Kill() {
 func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *KVServer {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
-	labgob.Register(Op{})
+	labgob.Register(KVCommand{})
 
 	kv := new(KVServer)
 	kv.me = me
@@ -95,6 +103,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	if kv.KvMap == nil {
 		kv.KvMap = make(map[string]string)
 	}
+	if kv.ClientReqSeqMap == nil {
+		kv.ClientReqSeqMap = make(map[int64]int64)
+	}
 	go kv.loopApply()
 	return kv
 }
@@ -105,28 +116,38 @@ func (kv *KVServer) loopApply() {
 		case apply := <- kv.applyCh:
 			kv.mu.Lock()
 			if apply.CommandValid {
-				kv.applyKVStore(apply.Command.(string))
+				kv.applyKVStore(apply.Command.(KVCommand))
 			}
+			kv.LastAppliedIndex = apply.CommandIndex
+			kv.LastAppliedTerm = apply.Term
 			kv.persistStore()
 			kv.mu.Unlock()
 		}
 	}
 }
 
-func (kv *KVServer) applyKVStore(command string) {
-	s := strings.Split(command, ",")
-	op := s[0]
-	key := s[1]
-	value := s[2]
+func (kv *KVServer) applyKVStore(command KVCommand) {
+	op := command.Operation
+	if op == GET {
+		return
+	}
+	key := command.Key
+	value := command.Value
+	clientId := command.ClientId
+	requestSeq := command.RequestSeq
+	reqSeqMap := kv.ClientReqSeqMap
+	if reqSeqMap[clientId] < requestSeq {
+		reqSeqMap[clientId] = requestSeq
+	} else {
+		return
+	}
 	switch op {
-	case string(PUT):
+	case PUT:
 		kv.KvMap[key] = value
 		break
-	case string(APPEND):
+	case APPEND:
 		oldValue := kv.KvMap[key]
-		if !strings.Contains(oldValue, value) {
-			kv.KvMap[key] = oldValue + value
-		}
+		kv.KvMap[key] = oldValue + value
 		break
 	}
 }
