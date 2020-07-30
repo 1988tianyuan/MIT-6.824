@@ -11,7 +11,7 @@ func (raft *Raft) Start(command interface{}) (int, int, bool) {
 }
 
 func (raft *Raft) internalStart(command interface{}, commandValid bool) (int, int, bool) {
-	index := raft.Logs[len(raft.Logs) - 1].CommandIndex + 1
+	index := len(raft.Logs) + raft.LastIncludedIndex + 1
 	term := raft.CurTermAndVotedFor.CurrentTerm
 	if raft.IsLeader() {
 		raft.Logs = append(raft.Logs, ApplyMsg{CommandValid: commandValid, Term: term, CommandIndex: index, Command: command})
@@ -26,6 +26,27 @@ func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan 
 	return ExtensionMake(peers, me, persister, applyCh, false)
 }
 
+func (raft *Raft) getLogEntry(index int) (bool, ApplyMsg) {
+	offset := raft.getOffset(index)
+	if offset >= 0 {
+		return true, raft.Logs[offset]
+	} else {
+		return false, ApplyMsg{}
+	}
+}
+
+func (raft *Raft) GetState() (int, bool) {
+	return raft.CurTermAndVotedFor.CurrentTerm, raft.IsLeader()
+}
+
+func (raft *Raft) getOffset(index int) int {
+	if index > raft.LastIncludedIndex {
+		return index - raft.LastIncludedIndex - 1
+	} else {
+		return -1
+	}
+}
+
 func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg, useDummyLog bool) *Raft {
 	raft := &Raft{}
 	raft.peers = peers
@@ -33,14 +54,23 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 	raft.Me = me
 	raft.state = FOLLOWER		// init with FOLLOWER state
 	raft.IsStart = true
-	raft.readPersist(persister.ReadRaftState())
 	raft.applyCh = applyCh
 	raft.UseDummyLog = useDummyLog
+	raft.readPersist(persister.ReadRaftState())
+
+	if raft.persister.SnapshotSize() == 0 {
+		raft.LastIncludedIndex = -1
+		raft.LastIncludedTerm = -1
+	}
 	if len(raft.Logs) == 0 {
+		raft.LastLogIndex = raft.LastIncludedIndex
+		raft.LastLogTerm = raft.LastIncludedTerm
 		raft.Logs = make([] ApplyMsg, 0)
-		raft.Logs = append(raft.Logs, ApplyMsg{CommandIndex: 0, CommandValid:false}) // init empty log for index=0
-		raft.LastLogIndex = len(raft.Logs) - 1
-		raft.LastLogTerm = -1
+		if raft.persister.SnapshotSize() == 0 {
+			// init empty log for index=0
+			raft.Logs = append(raft.Logs, ApplyMsg{CommandIndex: 0, CommandValid:false})
+			raft.LastLogIndex++
+		}
 	}
 	go raft.doFollowerJob()
 	return raft
@@ -48,8 +78,11 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 
 /* return true means the specific index and term log has been successfully committed by raft */
 func (raft *Raft) CheckCommittedIndexAndTerm(index int, term int) bool {
-	if raft.CommitIndex >= index && raft.Logs[index].Term == term {
-		return true
+	notCompacted, entry := raft.getLogEntry(index)
+	if notCompacted {
+		return raft.CommitIndex >= index && entry.Term == term
+	} else {
+		//TODO
+		return raft.CommitIndex >= index
 	}
-	return false
 }

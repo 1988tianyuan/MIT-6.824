@@ -25,15 +25,14 @@ type Raft struct {
 	CommitIndex        int
 	Logs               []ApplyMsg
 
+	LastIncludedIndex  int
+	LastIncludedTerm   int
+
 	// other public properties
 	UseDummyLog		   bool
 	LeaderId           int
 	Me                 int // this peer's index into peers[]
 	IsStart            bool
-}
-
-func (raft *Raft) GetState() (int, bool) {
-	return raft.CurTermAndVotedFor.CurrentTerm, raft.IsLeader()
 }
 
 type CurTermAndVotedFor struct {

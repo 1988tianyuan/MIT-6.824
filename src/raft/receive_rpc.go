@@ -97,9 +97,10 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
-	if raft.CommitIndex < recvCommitIndex && recvCommitIndex < len(raft.Logs) {
+	if raft.CommitIndex < recvCommitIndex && recvCommitIndex <= raft.LastLogIndex {
 		var endIndex int
-		if recvCommitIndex > matchIndex && raft.Logs[recvCommitIndex].Term != raft.CurTermAndVotedFor.CurrentTerm {
+		_, entry := raft.getLogEntry(recvCommitIndex)
+		if recvCommitIndex > matchIndex && entry.Term != raft.CurTermAndVotedFor.CurrentTerm {
 			endIndex = matchIndex
 		} else {
 			endIndex = recvCommitIndex
@@ -108,7 +109,8 @@ func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 		for shouldCommitIndex <= endIndex {
 			log.Printf("LogAppend: term: %d, raft-id: %d, 将index:%d 提交到状态机",
 				raft.CurTermAndVotedFor.CurrentTerm, raft.Me, shouldCommitIndex)
-			raft.applyCh <- raft.Logs[shouldCommitIndex]
+			_, entry := raft.getLogEntry(shouldCommitIndex)
+			raft.applyCh <- entry
 			shouldCommitIndex++
 		}
 		raft.CommitIndex = endIndex
@@ -123,14 +125,14 @@ func (raft *Raft) appendEntries(entries []AppendEntry, matchIndex int) int {
 		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, matchIndex)
 	term := raft.CurTermAndVotedFor.CurrentTerm
 	if matchIndex != raft.LastLogIndex {
-		raft.Logs = raft.Logs[0:matchIndex + 1]
+		raft.Logs = raft.Logs[0:matchIndex - raft.LastIncludedIndex]
 	}
 	for _, entry := range entries {
 		matchIndex++
 		item := ApplyMsg{CommandValid:entry.CommandValid, CommandIndex:matchIndex, Term:entry.Term, Command:entry.Command}
 		raft.Logs = append(raft.Logs, item)
 	}
-	raft.LastLogIndex = len(raft.Logs) - 1
+	raft.LastLogIndex = matchIndex
 	raft.LastLogTerm = term
 	log.Printf("LogAppend: term: %d, raft-id: %d, 结束append，最后matchIndex是%d",
 		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, matchIndex)
@@ -138,17 +140,17 @@ func (raft *Raft) appendEntries(entries []AppendEntry, matchIndex int) int {
 }
 
 func (raft *Raft) logConsistencyCheck(args *AppendEntriesArgs) (bool,int) {
-	logs := raft.Logs
-	index := len(logs) - 1
-	if index <= 0 && args.PrevLogIndex == 0 {
-		// empty log
-		return true, 0
-	} else {
-		if args.PrevLogIndex < len(logs) {
-			applyMsg := logs[args.PrevLogIndex]
-			if applyMsg.Term == args.PrevLogTerm && applyMsg.CommandIndex == args.PrevLogIndex {
-				return true, args.PrevLogIndex
-			}
+	if args.PrevLogIndex < raft.LastIncludedIndex {
+		// need sync snapshot
+		return false, 0
+	}
+	if args.PrevLogIndex == raft.LastIncludedIndex {
+		return true, args.PrevLogIndex
+	}
+	if args.PrevLogIndex <= raft.LastLogIndex {
+		_, entry := raft.getLogEntry(args.PrevLogIndex)
+		if entry.Term == args.PrevLogTerm && entry.CommandIndex == args.PrevLogIndex {
+			return true, args.PrevLogIndex
 		}
 	}
 	return false, 0
