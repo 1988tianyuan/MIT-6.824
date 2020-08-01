@@ -86,8 +86,15 @@ type ApplyMsg struct {
 	Term 		 int
 }
 
-type SnapShot struct {
+type InstallSnapshotArgs struct {
 	LastIncludedIndex int
 	LastIncludedTerm  int
-	Command   interface{}
+	Term              int
+	LeaderId          int
+	SnapshotData      []byte
+}
+
+type InstallSnapshotReply struct {
+	Term int
+	Success bool
 }

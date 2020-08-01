@@ -63,31 +63,11 @@ func (kv *KVServer) Get(args *GetArgs, reply *CommonReply) {
 	kv.startRaft(GET, args.Key, "", reply, true, 0, 0)
 }
 
-//
-// the tester calls Kill() when a KVServer instance won't
-// be needed again. you are not required to do anything
-// in Kill(), but it might be convenient to (for example)
-// turn off debug output from this instance.
-//
 func (kv *KVServer) Kill() {
 	kv.rf.Kill()
 	// Your code here, if desired.
 }
 
-//
-// servers[] contains the ports of the set of
-// servers that will cooperate via Raft to
-// form the fault-tolerant key/value service.
-// me is the index of the current server in servers[].
-// the k/v server should store snapshots through the underlying Raft
-// implementation, which should call persister.SaveStateAndSnapshot() to
-// atomically save the Raft state along with the snapshot.
-// the k/v server should snapshot when Raft's saved state exceeds maxraftstate bytes,
-// in order to allow Raft to garbage-collect its log. if maxraftstate is -1,
-// you don't need to snapshot.
-// StartKVServer() must return quickly, so it should start goroutines
-// for any long-running work.
-//
 func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *KVServer {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
@@ -111,7 +91,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 }
 
 func (kv *KVServer) loopApply() {
-	for kv.rf.IsStart {
+	for kv.IsRunning() {
 		select {
 		case apply := <- kv.applyCh:
 			kv.mu.Lock()
@@ -120,6 +100,9 @@ func (kv *KVServer) loopApply() {
 			}
 			kv.LastAppliedIndex = apply.CommandIndex
 			kv.LastAppliedTerm = apply.Term
+			if kv.maxraftstate > 0 && kv.persister.RaftStateSize() > kv.maxraftstate {
+				kv.rf.CompactLog(kv.LastAppliedIndex, kv.LastAppliedTerm)
+			}
 			kv.persistStore()
 			kv.mu.Unlock()
 		}

@@ -69,3 +69,7 @@ func nrand() int64 {
 	x := bigx.Int64()
 	return x
 }
+
+func (kv *KVServer) IsRunning() bool {
+	return kv.rf.IsStart
+}

@@ -17,7 +17,7 @@ func (kv *KVServer) persistStore() {
 		log.Printf("序列化失败！%v,%v,%v,%v", err1, err2, err3, err4)
 	} else {
 		snapshotBytes := buffer.Bytes()
-		kv.rf.PersistStateAndSnapshot(snapshotBytes)
+		kv.rf.WriteRaftStateAndSnapshotPersist(snapshotBytes)
 	}
 }
 

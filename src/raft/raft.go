@@ -17,7 +17,7 @@ func (raft *Raft) internalStart(command interface{}, commandValid bool) (int, in
 		raft.Logs = append(raft.Logs, ApplyMsg{CommandValid: commandValid, Term: term, CommandIndex: index, Command: command})
 		raft.LastLogIndex = index
 		raft.LastLogTerm = term
-		go raft.persistState()
+		go raft.writeRaftStatePersist()
 	}
 	return index, term, raft.IsLeader()
 }
@@ -56,7 +56,7 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 	raft.IsStart = true
 	raft.applyCh = applyCh
 	raft.UseDummyLog = useDummyLog
-	raft.readPersist(persister.ReadRaftState())
+	raft.readRaftStatePersist()
 
 	if raft.persister.SnapshotSize() == 0 {
 		raft.LastIncludedIndex = -1
@@ -84,5 +84,18 @@ func (raft *Raft) CheckCommittedIndexAndTerm(index int, term int) bool {
 	} else {
 		//TODO
 		return raft.CommitIndex >= index
+	}
+}
+
+func (raft *Raft) CompactLog(lastAppliedIndex int, lastAppliedTerm int) {
+	beginOffset := raft.getOffset(lastAppliedIndex) + 1
+	endOffset := raft.getOffset(raft.LastLogIndex)
+	raft.LastIncludedIndex = lastAppliedIndex
+	raft.LastIncludedTerm = lastAppliedTerm
+	if raft.LastIncludedIndex < raft.LastLogIndex {
+		raft.Logs = raft.Logs[beginOffset:endOffset + 1]
+	} else if raft.LastIncludedIndex == raft.LastLogIndex {
+		// all the logs have to be compacted
+		raft.Logs = make([] ApplyMsg, 0)
 	}
 }

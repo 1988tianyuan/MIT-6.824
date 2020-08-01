@@ -39,7 +39,7 @@ func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, args.CandidateId, args.Term,
 			args.LastLogIndex, args.LastLogTerm, raft.LastLogIndex, raft.LastLogTerm)
 	}
-	go raft.persistState()
+	go raft.writeRaftStatePersist()
 }
 
 /*
@@ -80,7 +80,7 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 		raft.stepDown(recvTerm)
 		// refresh Term in reply
 		reply.Term = raft.CurTermAndVotedFor.CurrentTerm
-		go raft.persistState()
+		go raft.writeRaftStatePersist()
 	}
 	if !raft.IsLeader() && raft.LeaderId != args.LeaderId {
 		raft.LeaderId = args.LeaderId
@@ -88,7 +88,7 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 	success, matchIndex := raft.logConsistencyCheck(args)
 	if success && len(args.Entries) > 0 {
 		matchIndex = raft.appendEntries(args.Entries, matchIndex)
-		go raft.persistState()
+		go raft.writeRaftStatePersist()
 	}
 	reply.Success = success
 	go raft.doCommit(args.CommitIndex, matchIndex)
@@ -109,14 +109,16 @@ func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 		for shouldCommitIndex <= endIndex {
 			log.Printf("LogAppend: term: %d, raft-id: %d, 将index:%d 提交到状态机",
 				raft.CurTermAndVotedFor.CurrentTerm, raft.Me, shouldCommitIndex)
-			_, entry := raft.getLogEntry(shouldCommitIndex)
-			raft.applyCh <- entry
+			success, entry := raft.getLogEntry(shouldCommitIndex)
+			if success {
+				raft.applyCh <- entry
+			}
 			shouldCommitIndex++
 		}
 		raft.CommitIndex = endIndex
 		log.Printf("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d, 最终matchIndex是:%d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, raft.CommitIndex, matchIndex)
-		go raft.persistState()
+		go raft.writeRaftStatePersist()
 	}
 }
 
@@ -144,14 +146,57 @@ func (raft *Raft) logConsistencyCheck(args *AppendEntriesArgs) (bool,int) {
 		// need sync snapshot
 		return false, 0
 	}
-	if args.PrevLogIndex == raft.LastIncludedIndex {
+	if args.PrevLogIndex == raft.LastIncludedIndex && args.PrevLogTerm == raft.LastIncludedTerm {
 		return true, args.PrevLogIndex
 	}
 	if args.PrevLogIndex <= raft.LastLogIndex {
-		_, entry := raft.getLogEntry(args.PrevLogIndex)
-		if entry.Term == args.PrevLogTerm && entry.CommandIndex == args.PrevLogIndex {
+		success, entry := raft.getLogEntry(args.PrevLogIndex)
+		if success && entry.Term == args.PrevLogTerm && entry.CommandIndex == args.PrevLogIndex {
 			return true, args.PrevLogIndex
 		}
 	}
 	return false, 0
+}
+
+
+func (raft *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
+	reply.Success = false
+	recvTerm := args.Term
+	if args.Term < raft.CurTermAndVotedFor.CurrentTerm {
+		log.Printf("InstallSnapshot: raft-id: %d, InstallSnapshot，recvTerm是:%d, 而我的term是:%d", raft.Me,
+			recvTerm, raft.CurTermAndVotedFor.CurrentTerm)
+		reply.Term = raft.CurTermAndVotedFor.CurrentTerm
+		return
+	}
+	raft.lastHeartBeatTime = currentTimeMillis()
+	if raft.CurTermAndVotedFor.CurrentTerm < recvTerm || raft.isCandidate() {
+		// that means current raft should change to FOLLOWER,
+		// because there is another raft are doing LEADER job
+		raft.stepDown(recvTerm)
+		// refresh Term in reply
+		reply.Term = raft.CurTermAndVotedFor.CurrentTerm
+		go raft.writeRaftStatePersist()
+	}
+	if !raft.IsLeader() && raft.LeaderId != args.LeaderId {
+		raft.LeaderId = args.LeaderId
+	}
+	raft.LastIncludedIndex = args.LastIncludedIndex
+	raft.LastIncludedTerm = args.LastIncludedTerm
+	if args.LastIncludedIndex >= raft.LastLogIndex || args.LastIncludedIndex <= raft.LastIncludedIndex {
+		raft.LastLogIndex = raft.LastIncludedIndex
+		raft.LastLogTerm = raft.LastIncludedTerm
+		// all the logs have to be compacted
+		raft.Logs = make([] ApplyMsg, 0)
+	} else {
+		beginOffset := raft.getOffset(args.LastIncludedIndex) + 1
+		endOffset := raft.getOffset(raft.LastLogIndex)
+		raft.Logs = raft.Logs[beginOffset + 1:endOffset + 1]
+	}
+	if raft.CommitIndex < raft.LastIncludedIndex {
+		raft.CommitIndex = raft.LastIncludedIndex
+	}
+	reply.Success = true
+	go raft.WriteRaftStateAndSnapshotPersist(args.SnapshotData)
 }

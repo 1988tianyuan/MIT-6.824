@@ -36,7 +36,43 @@ func (raft *Raft) syncLogsToFollowers() {
 }
 
 func (raft *Raft) sendSnapshotRequest(follower int) {
-	//TODO
+	raft.mu.Lock()
+	if !raft.IsLeader() {
+		raft.mu.Unlock()
+		return
+	}
+	snapshotData := raft.persister.ReadSnapshot()
+	args := InstallSnapshotArgs{raft.LastIncludedIndex, raft.LastIncludedTerm,
+		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, snapshotData}
+	reply := InstallSnapshotReply{}
+	raft.mu.Unlock()
+	ok := raft.peers[follower].Call("Raft.InstallSnapshot", &args, &reply)
+	if ok {
+		raft.handleInstallSnapshotResult(reply, follower, args.LastIncludedIndex)
+	}
+}
+
+func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follower int, sentLastIncludedIndex int) {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
+	if !raft.IsLeader() {
+		return
+	}
+	recvTerm := reply.Term
+	if recvTerm > raft.CurTermAndVotedFor.CurrentTerm {
+		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 的最新的term: %d, 降职为FOLLOWER",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, recvTerm)
+		raft.stepDown(recvTerm)
+		return
+	}
+	if reply.Success {
+		if raft.matchIndex[follower] < sentLastIncludedIndex {
+			raft.matchIndex[follower] = sentLastIncludedIndex
+		}
+		if raft.nextIndex[follower] < sentLastIncludedIndex + 1 {
+			raft.nextIndex[follower] = sentLastIncludedIndex + 1
+		}
+	}
 }
 
 /*
@@ -54,6 +90,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 	matchIndex := raft.matchIndex[follower]
 	if nextIndex <= raft.LastIncludedIndex {
 		go raft.sendSnapshotRequest(follower)
+		raft.mu.Unlock()
 		return
 	}
 
@@ -162,20 +199,21 @@ func (raft *Raft) checkCommit(endIndex int) {
 			shouldCommitIndex++
 		}
 		raft.CommitIndex = endIndex		// refresh latest commitIndex
-		go raft.persistState()
+		go raft.writeRaftStatePersist()
 	}
 }
 
 func (raft *Raft) updateFollowerIndex(follower int) {
 	nextIndex := raft.nextIndex[follower]
-	if nextIndex - 1 <= raft.LastIncludedIndex {
+	if nextIndex - 2 <= raft.LastIncludedIndex {
 		raft.nextIndex[follower] = raft.LastIncludedIndex
 		return
 	}
-	_, entry := raft.getLogEntry(nextIndex - 1)
+	_, lastTimePreEntry := raft.getLogEntry(nextIndex - 1)
 	updatedNextIndex := raft.LastIncludedIndex + 1
 	for i := nextIndex - 2; i > raft.LastIncludedIndex; i-- {
-		if raft.Logs[i].Term != entry.Term {
+		_, entry := raft.getLogEntry(i)
+		if entry.Term != lastTimePreEntry.Term {
 			updatedNextIndex = i
 			break
 		}
