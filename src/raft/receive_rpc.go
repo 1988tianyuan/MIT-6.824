@@ -198,5 +198,5 @@ func (raft *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnaps
 		raft.CommitIndex = raft.LastIncludedIndex
 	}
 	reply.Success = true
-	go raft.WriteRaftStateAndSnapshotPersist(args.SnapshotData)
+	go raft.OnReceiveSnapshot(args.SnapshotData, args.LastIncludedIndex, args.LastIncludedTerm)
 }

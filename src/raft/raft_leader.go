@@ -16,6 +16,7 @@ func (raft *Raft) changeToLeader(votes int)  {
 	begin LEADER's job
 */
 func (raft *Raft) doLeaderJob()  {
+	raft.OnRaftLeaderSelected(raft)
 	raft.initFollowerIndex()
 	raft.doHeartbeatJob()
 }
@@ -66,6 +67,8 @@ func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follow
 		return
 	}
 	if reply.Success {
+		log.Printf("SendSnapshotRequest==> term: %d, raft-id: %d, 将snapshot同步到server: %d, sentLastIncludedIndex是:%d",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, sentLastIncludedIndex)
 		if raft.matchIndex[follower] < sentLastIncludedIndex {
 			raft.matchIndex[follower] = sentLastIncludedIndex
 		}

@@ -28,20 +28,40 @@ func (kv *KVServer) readPersistedStore() {
 	}
 	buffer := bytes.NewBuffer(snapshotBytes)
 	decoder := labgob.NewDecoder(buffer)
-	var KvMap       		map[string]string
-	var ReqSeqMap       	map[int64]int64
+	kv.readPersistedKvMap(decoder)
+	kv.readReqSeqMap(decoder)
+	kv.readLastAppliedIndexAndTerm(decoder)
+}
+
+func (kv *KVServer) readLastAppliedIndexAndTerm(decoder *labgob.LabDecoder)  {
 	var LastAppliedIndex    int
 	var LastAppliedTerm     int
-	err1 := decoder.Decode(&KvMap)
-	err2 := decoder.Decode(&ReqSeqMap)
-	err3 := decoder.Decode(&LastAppliedIndex)
-	err4 := decoder.Decode(&LastAppliedTerm)
-	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
-		log.Printf("反序列化失败！%v,%v,%v,%v", err1, err2, err3, err4)
+	err1 := decoder.Decode(&LastAppliedIndex)
+	err2 := decoder.Decode(&LastAppliedTerm)
+	if err1 != nil || err2 != nil {
+		log.Printf("反序列化失败！%v,%v", err1, err2)
 	} else {
-		kv.KvMap = KvMap
-		kv.ClientReqSeqMap = ReqSeqMap
 		kv.LastAppliedIndex = LastAppliedIndex
 		kv.LastAppliedTerm = LastAppliedTerm
+	}
+}
+
+func (kv *KVServer) readPersistedKvMap(decoder *labgob.LabDecoder)  {
+	var KvMap map[string]string
+	err := decoder.Decode(&KvMap)
+	if err != nil {
+		log.Printf("反序列化失败！%v", err)
+	} else {
+		kv.KvMap = KvMap
+	}
+}
+
+func (kv *KVServer) readReqSeqMap(decoder *labgob.LabDecoder)  {
+	var ReqSeqMap       	map[int64]int64
+	err := decoder.Decode(&ReqSeqMap)
+	if err != nil {
+		log.Printf("反序列化失败！%v", err)
+	} else {
+		kv.ClientReqSeqMap = ReqSeqMap
 	}
 }

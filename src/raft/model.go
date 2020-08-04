@@ -18,6 +18,9 @@ type Raft struct {
 	nextIndex          []int
 	lastApplied        int
 
+	OnRaftLeaderSelected func(*Raft)
+	OnReceiveSnapshot    func([]byte, int, int)
+
 	// public properties, need persisted
 	LastLogIndex       int
 	LastLogTerm        int

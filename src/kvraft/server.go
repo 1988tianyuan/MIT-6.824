@@ -1,6 +1,7 @@
 package raftkv
 
 import (
+	"bytes"
 	"labgob"
 	"labrpc"
 	"log"
@@ -27,7 +28,7 @@ func (kv *KVServer) startRaft(op Operation, key string, value string, reply *Com
 		if isRead {
 			reply.Content = kv.KvMap[key]
 		}
-		if !rf.CheckCommittedIndexAndTerm(curIndex, curTerm) {
+		if !rf.IsLeader() || !rf.CheckCommittedIndexAndTerm(curIndex, curTerm) {
 			reply.Err = "failed to execute request, please try again."
 		}
 	}
@@ -86,6 +87,26 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	if kv.ClientReqSeqMap == nil {
 		kv.ClientReqSeqMap = make(map[int64]int64)
 	}
+
+	kv.rf.OnRaftLeaderSelected = func (raft *raft.Raft) {
+		kvMap := &kv.KvMap
+		log.Printf("OnRaftLeaderSelected==> term: %d, raft-id: %d, 当前的快照是: %v",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, *kvMap)
+	}
+	kv.rf.OnReceiveSnapshot = func (snapshot []byte, lastIncludedIndex int, lastIncludedTerm int) {
+		kv.mu.Lock()
+		defer kv.mu.Unlock()
+		if kv.LastAppliedIndex < lastIncludedIndex {
+			kv.LastAppliedIndex = lastIncludedIndex
+			kv.LastAppliedTerm = lastIncludedTerm
+		}
+		buffer := bytes.NewBuffer(snapshot)
+		decoder := labgob.NewDecoder(buffer)
+		kv.readPersistedKvMap(decoder)
+		kv.readReqSeqMap(decoder)
+		kv.persistStore()
+	}
+
 	go kv.loopApply()
 	return kv
 }
@@ -95,15 +116,17 @@ func (kv *KVServer) loopApply() {
 		select {
 		case apply := <- kv.applyCh:
 			kv.mu.Lock()
-			if apply.CommandValid {
-				kv.applyKVStore(apply.Command.(KVCommand))
+			if kv.LastAppliedIndex < apply.CommandIndex {
+				kv.LastAppliedIndex = apply.CommandIndex
+				kv.LastAppliedTerm = apply.Term
+				if apply.CommandValid {
+					kv.applyKVStore(apply.Command.(KVCommand))
+				}
+				if kv.maxraftstate > 0 && kv.persister.RaftStateSize() > kv.maxraftstate {
+					kv.rf.CompactLog(kv.LastAppliedIndex, kv.LastAppliedTerm)
+				}
+				kv.persistStore()
 			}
-			kv.LastAppliedIndex = apply.CommandIndex
-			kv.LastAppliedTerm = apply.Term
-			if kv.maxraftstate > 0 && kv.persister.RaftStateSize() > kv.maxraftstate {
-				kv.rf.CompactLog(kv.LastAppliedIndex, kv.LastAppliedTerm)
-			}
-			kv.persistStore()
 			kv.mu.Unlock()
 		}
 	}
