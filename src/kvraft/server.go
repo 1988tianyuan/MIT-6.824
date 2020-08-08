@@ -6,6 +6,7 @@ import (
 	"labrpc"
 	"log"
 	"raft"
+	"strconv"
 	"time"
 )
 
@@ -18,7 +19,7 @@ func (kv *KVServer) startRaft(op Operation, key string, value string, reply *Com
 	if !isLeader {
 		reply.WrongLeader = true
 	} else {
-		for !kv.isApplied(curIndex, curTerm) {
+		for !kv.rf.IsApplied(curIndex, curTerm) {
 			if !rf.IsLeader() {
 				reply.WrongLeader = true
 				return
@@ -26,16 +27,15 @@ func (kv *KVServer) startRaft(op Operation, key string, value string, reply *Com
 			time.Sleep(time.Duration(100) * time.Millisecond)
 		}
 		if isRead {
+			kv.mu.RLock()
 			reply.Content = kv.KvMap[key]
+			kv.mu.RUnlock()
 		}
 		if !rf.IsLeader() || !rf.CheckCommittedIndexAndTerm(curIndex, curTerm) {
 			reply.Err = "failed to execute request, please try again."
 		}
+		reply.IndexAndTerm = strconv.Itoa(curIndex) + ":" + strconv.Itoa(curTerm)
 	}
-}
-
-func (kv *KVServer) isApplied(index int, term int) bool {
-	return kv.LastAppliedIndex >= index && kv.LastAppliedTerm >= term
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *CommonReply) {
@@ -76,35 +76,36 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv := new(KVServer)
 	kv.me = me
-	kv.maxraftstate = maxraftstate
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.persister = persister
 	kv.readPersistedStore()
 	kv.rf = raft.ExtensionMake(servers, me, persister, kv.applyCh, true)
+	kv.rf.MaxStateSize = maxraftstate
 	if kv.KvMap == nil {
 		kv.KvMap = make(map[string]string)
 	}
 	if kv.ClientReqSeqMap == nil {
 		kv.ClientReqSeqMap = make(map[int64]int64)
 	}
-
 	kv.rf.OnRaftLeaderSelected = func (raft *raft.Raft) {
 		kvMap := &kv.KvMap
 		log.Printf("OnRaftLeaderSelected==> term: %d, raft-id: %d, 当前的快照是: %v",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, *kvMap)
+		log.Printf("OnRaftLeaderSelected==> term: %d, raft-id: %d, 当前的raft状态是: %v",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, raft)
 	}
-	kv.rf.OnReceiveSnapshot = func (snapshot []byte, lastIncludedIndex int, lastIncludedTerm int) {
+	kv.rf.OnReceiveSnapshot = func (snapshotBytes []byte, lastIncludedIndex int, lastIncludedTerm int,
+		raftHandleFunc func(int, int)) {
 		kv.mu.Lock()
-		defer kv.mu.Unlock()
-		if kv.LastAppliedIndex < lastIncludedIndex {
-			kv.LastAppliedIndex = lastIncludedIndex
-			kv.LastAppliedTerm = lastIncludedTerm
-		}
-		buffer := bytes.NewBuffer(snapshot)
+		buffer := bytes.NewBuffer(snapshotBytes)
 		decoder := labgob.NewDecoder(buffer)
+		kv.rf.RaftLock()
+		raftHandleFunc(lastIncludedIndex, lastIncludedTerm)
+		kv.rf.RaftUnlock()
 		kv.readPersistedKvMap(decoder)
 		kv.readReqSeqMap(decoder)
-		kv.persistStore()
+		kv.mu.Unlock()
+		kv.rf.WriteRaftStateAndSnapshotPersist(snapshotBytes)
 	}
 
 	go kv.loopApply()
@@ -115,19 +116,18 @@ func (kv *KVServer) loopApply() {
 	for kv.IsRunning() {
 		select {
 		case apply := <- kv.applyCh:
-			kv.mu.Lock()
-			if kv.LastAppliedIndex < apply.CommandIndex {
-				kv.LastAppliedIndex = apply.CommandIndex
-				kv.LastAppliedTerm = apply.Term
+			if kv.rf.LastAppliedIndex < apply.CommandIndex {
+				//kv.rf.RaftLock()
+				kv.rf.LastAppliedIndex = apply.CommandIndex
+				kv.rf.LastAppliedTerm = apply.Term
+				//kv.rf.RaftUnlock()
+				kv.mu.Lock()
 				if apply.CommandValid {
 					kv.applyKVStore(apply.Command.(KVCommand))
 				}
-				if kv.maxraftstate > 0 && kv.persister.RaftStateSize() > kv.maxraftstate {
-					kv.rf.CompactLog(kv.LastAppliedIndex, kv.LastAppliedTerm)
-				}
+				kv.mu.Unlock()
 				kv.persistStore()
 			}
-			kv.mu.Unlock()
 		}
 	}
 }

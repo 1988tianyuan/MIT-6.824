@@ -15,6 +15,14 @@ const (
 	HEARTBEAT_PERIOD              = time.Duration(100) * time.Millisecond
 )
 
+func (raft *Raft) RaftLock() {
+	raft.mu.Lock()
+}
+
+func (raft *Raft) RaftUnlock() {
+	raft.mu.Unlock()
+}
+
 func (raft *Raft) Kill() {
 	raft.IsStart = false
 }

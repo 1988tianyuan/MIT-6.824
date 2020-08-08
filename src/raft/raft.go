@@ -1,6 +1,9 @@
 package raft
 
-import "labrpc"
+import (
+	"labrpc"
+	"log"
+)
 // import "bytes"
 // import "labgob"
 
@@ -11,9 +14,11 @@ func (raft *Raft) Start(command interface{}) (int, int, bool) {
 }
 
 func (raft *Raft) internalStart(command interface{}, commandValid bool) (int, int, bool) {
-	index := len(raft.Logs) + raft.LastIncludedIndex + 1
-	term := raft.CurTermAndVotedFor.CurrentTerm
+	var index int
+	var term int
 	if raft.IsLeader() {
+		index = raft.LastLogIndex + 1
+		term = raft.CurTermAndVotedFor.CurrentTerm
 		raft.Logs = append(raft.Logs, ApplyMsg{CommandValid: commandValid, Term: term, CommandIndex: index, Command: command})
 		raft.LastLogIndex = index
 		raft.LastLogTerm = term
@@ -29,7 +34,8 @@ func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan 
 func (raft *Raft) getLogEntry(index int) (bool, ApplyMsg) {
 	offset := raft.getOffset(index)
 	if offset >= 0 {
-		return true, raft.Logs[offset]
+		entry := raft.Logs[offset]
+		return true, entry
 	} else {
 		return false, ApplyMsg{}
 	}
@@ -41,7 +47,14 @@ func (raft *Raft) GetState() (int, bool) {
 
 func (raft *Raft) getOffset(index int) int {
 	if index > raft.LastIncludedIndex {
-		return index - raft.LastIncludedIndex - 1
+		offset := index - raft.LastIncludedIndex - 1
+		if offset >= 0 {
+			entry := raft.Logs[offset]
+			if entry.CommandIndex != index {
+				println("啊啊啊啊啊")
+			}
+		}
+		return offset
 	} else {
 		return -1
 	}
@@ -55,9 +68,14 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 	raft.state = FOLLOWER		// init with FOLLOWER state
 	raft.IsStart = true
 	raft.applyCh = applyCh
+	raft.persistCh = make(chan PersistStruct)
 	raft.UseDummyLog = useDummyLog
+	raft.persistSeq = 0
 	raft.readRaftStatePersist()
 
+	if len(raft.Logs) != 0 && raft.LastIncludedIndex + 1 != raft.Logs[0].CommandIndex {
+		println("嘿嘿嘿")
+	}
 	if raft.persister.SnapshotSize() == 0 {
 		raft.LastIncludedIndex = -1
 		raft.LastIncludedTerm = -1
@@ -73,29 +91,76 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 		}
 	}
 	go raft.doFollowerJob()
+	//go raft.loopPersistRaftState()
 	return raft
+}
+
+func (raft *Raft) loopPersistRaftState() {
+	for raft.IsStart {
+		select {
+		case persistStruct := <- raft.persistCh:
+			//if persistStruct.persistSeq <= raft.persistSeq {
+			//	continue
+			//}
+			raft.persistSeq = persistStruct.persistSeq
+			if persistStruct.snapshot != nil {
+				raft.persister.SaveStateAndSnapshot(persistStruct.raftState, persistStruct.snapshot)
+			} else {
+				raft.persister.SaveRaftState(persistStruct.raftState)
+			}
+			if raft.MaxStateSize > 0 && raft.persister.RaftStateSize() > (raft.MaxStateSize/2)*3 &&
+				raft.LastIncludedIndex != raft.LastAppliedIndex{
+				//raft.logCompact()
+			}
+		}
+	}
 }
 
 /* return true means the specific index and term log has been successfully committed by raft */
 func (raft *Raft) CheckCommittedIndexAndTerm(index int, term int) bool {
+	raft.mu.RLock()
+	defer raft.mu.RUnlock()
 	notCompacted, entry := raft.getLogEntry(index)
 	if notCompacted {
-		return raft.CommitIndex >= index && entry.Term == term
+		return raft.LastAppliedIndex >= index && entry.Term == term
 	} else {
 		//TODO
-		return raft.CommitIndex >= index
+		return raft.LastAppliedIndex >= index
 	}
 }
 
-func (raft *Raft) CompactLog(lastAppliedIndex int, lastAppliedTerm int) {
-	beginOffset := raft.getOffset(lastAppliedIndex) + 1
+func (raft *Raft) IsApplied(index int, term int) bool {
+	return raft.LastAppliedIndex >= index && raft.LastAppliedTerm >= term
+}
+
+func (raft *Raft) logCompact() {
+	raft.mu.Lock()
+	if raft.MaxStateSize <= 0 || raft.persister.RaftStateSize() < (raft.MaxStateSize/2)*3 {
+		raft.mu.Unlock()
+		return
+	}
+	log.Printf("CompactLog: raft-id: %d, lastAppliedIndex是: %d, lastIncludedIndex是: %d, lastAppliedTerm是: %d", raft.Me,
+		raft.LastAppliedIndex, raft.LastIncludedIndex, raft.LastAppliedTerm)
+	beginOffset := raft.getOffset(raft.LastAppliedIndex) + 1
 	endOffset := raft.getOffset(raft.LastLogIndex)
-	raft.LastIncludedIndex = lastAppliedIndex
-	raft.LastIncludedTerm = lastAppliedTerm
+	raft.LastIncludedIndex = raft.LastAppliedIndex
+	raft.LastIncludedTerm = raft.LastAppliedTerm
 	if raft.LastIncludedIndex < raft.LastLogIndex {
 		raft.Logs = raft.Logs[beginOffset:endOffset + 1]
 	} else if raft.LastIncludedIndex == raft.LastLogIndex {
 		// all the logs have to be compacted
 		raft.Logs = make([] ApplyMsg, 0)
+	}
+	raft.mu.Unlock()
+	data := raft.serializeRaftState()
+	if data != nil {
+		persistSeq := currentTimeMillis()
+		go raft.SaveStateAndSnapshotStruct(PersistStruct{data, nil, persistSeq})
+	}
+	if len(raft.Logs) != 0 && raft.LastLogIndex != raft.Logs[len(raft.Logs) - 1].CommandIndex {
+		println("呵呵呵")
+	}
+	if len(raft.Logs) != 0 && raft.LastIncludedIndex + 1 != raft.Logs[0].CommandIndex {
+		println("嗨嗨嗨")
 	}
 }

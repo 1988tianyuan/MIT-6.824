@@ -43,13 +43,15 @@ func (raft *Raft) sendSnapshotRequest(follower int) {
 		return
 	}
 	snapshotData := raft.persister.ReadSnapshot()
-	args := InstallSnapshotArgs{raft.LastIncludedIndex, raft.LastIncludedTerm,
-		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, snapshotData}
+	sentIndex := raft.LastAppliedIndex
+	args := InstallSnapshotArgs{sentIndex,
+		raft.LastAppliedTerm, raft.CurTermAndVotedFor.CurrentTerm,
+		raft.Me, snapshotData}
 	reply := InstallSnapshotReply{}
 	raft.mu.Unlock()
 	ok := raft.peers[follower].Call("Raft.InstallSnapshot", &args, &reply)
 	if ok {
-		raft.handleInstallSnapshotResult(reply, follower, args.LastIncludedIndex)
+		raft.handleInstallSnapshotResult(reply, follower, sentIndex)
 	}
 }
 

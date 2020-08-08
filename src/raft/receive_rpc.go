@@ -91,6 +91,9 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 		go raft.writeRaftStatePersist()
 	}
 	reply.Success = success
+	if matchIndex == 0 && args.CommitIndex > 0 && raft.CommitIndex < args.CommitIndex {
+		println("哈哈哈")
+	}
 	go raft.doCommit(args.CommitIndex, matchIndex)
 }
 
@@ -104,6 +107,9 @@ func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 			endIndex = matchIndex
 		} else {
 			endIndex = recvCommitIndex
+		}
+		if endIndex == 0 {
+			return
 		}
 		shouldCommitIndex := raft.CommitIndex + 1
 		for shouldCommitIndex <= endIndex {
@@ -161,13 +167,13 @@ func (raft *Raft) logConsistencyCheck(args *AppendEntriesArgs) (bool,int) {
 
 func (raft *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	raft.mu.Lock()
-	defer raft.mu.Unlock()
 	reply.Success = false
 	recvTerm := args.Term
 	if args.Term < raft.CurTermAndVotedFor.CurrentTerm {
 		log.Printf("InstallSnapshot: raft-id: %d, InstallSnapshot，recvTerm是:%d, 而我的term是:%d", raft.Me,
 			recvTerm, raft.CurTermAndVotedFor.CurrentTerm)
 		reply.Term = raft.CurTermAndVotedFor.CurrentTerm
+		raft.mu.Unlock()
 		return
 	}
 	raft.lastHeartBeatTime = currentTimeMillis()
@@ -182,21 +188,33 @@ func (raft *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnaps
 	if !raft.IsLeader() && raft.LeaderId != args.LeaderId {
 		raft.LeaderId = args.LeaderId
 	}
-	raft.LastIncludedIndex = args.LastIncludedIndex
-	raft.LastIncludedTerm = args.LastIncludedTerm
-	if args.LastIncludedIndex >= raft.LastLogIndex || args.LastIncludedIndex <= raft.LastIncludedIndex {
-		raft.LastLogIndex = raft.LastIncludedIndex
-		raft.LastLogTerm = raft.LastIncludedTerm
-		// all the logs have to be compacted
-		raft.Logs = make([] ApplyMsg, 0)
-	} else {
-		beginOffset := raft.getOffset(args.LastIncludedIndex) + 1
-		endOffset := raft.getOffset(raft.LastLogIndex)
-		raft.Logs = raft.Logs[beginOffset + 1:endOffset + 1]
-	}
-	if raft.CommitIndex < raft.LastIncludedIndex {
-		raft.CommitIndex = raft.LastIncludedIndex
-	}
 	reply.Success = true
-	go raft.OnReceiveSnapshot(args.SnapshotData, args.LastIncludedIndex, args.LastIncludedTerm)
+	recvLastAppliedIndex := args.LastAppliedIndex
+	recvLastAppliedTerm := args.LastAppliedTerm
+	if raft.CommitIndex < recvLastAppliedIndex {
+		raft.CommitIndex = recvLastAppliedIndex
+	}
+	raft.mu.Unlock()
+	go raft.OnReceiveSnapshot(args.SnapshotData, recvLastAppliedIndex, recvLastAppliedTerm,
+		func(recvLastAppliedIndex int, recvLastAppliedTerm int) {
+			log.Printf("InstallSnapshot: raft-id: %d, recvLastAppliedIndex是: %d, recvLastAppliedTerm是: %d", raft.Me,
+				recvLastAppliedIndex, recvLastAppliedTerm)
+			if recvLastAppliedIndex >= raft.LastLogIndex || recvLastAppliedIndex <= raft.LastIncludedIndex {
+				raft.LastLogIndex = recvLastAppliedIndex
+				raft.LastLogTerm = recvLastAppliedTerm
+				// all the logs have to be compacted
+				raft.Logs = make([] ApplyMsg, 0)
+			} else {
+				beginOffset := raft.getOffset(recvLastAppliedIndex) + 1
+				endOffset := raft.getOffset(raft.LastLogIndex)
+				raft.Logs = raft.Logs[beginOffset + 1:endOffset + 1]
+			}
+			raft.LastIncludedIndex = recvLastAppliedIndex
+			raft.LastIncludedTerm = recvLastAppliedTerm
+			raft.LastAppliedIndex = recvLastAppliedIndex
+			raft.LastAppliedTerm = recvLastAppliedTerm
+			if len(raft.Logs) != 0 && raft.LastLogIndex != raft.Logs[len(raft.Logs) - 1].CommandIndex {
+				println("呵呵呵")
+			}
+	})
 }
