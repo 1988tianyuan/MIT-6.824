@@ -16,6 +16,7 @@ func (raft *Raft) changeToLeader(votes int)  {
 	begin LEADER's job
 */
 func (raft *Raft) doLeaderJob()  {
+	raft.OnRaftLeaderSelected(raft)
 	raft.initFollowerIndex()
 	raft.doHeartbeatJob()
 }
@@ -36,7 +37,46 @@ func (raft *Raft) syncLogsToFollowers() {
 }
 
 func (raft *Raft) sendSnapshotRequest(follower int) {
-	//TODO
+	raft.mu.Lock()
+	if !raft.IsLeader() {
+		raft.mu.Unlock()
+		return
+	}
+	snapshotData := raft.persister.ReadSnapshot()
+	args := InstallSnapshotArgs{raft.LastIncludedIndex,
+		raft.LastIncludedTerm, raft.CurTermAndVotedFor.CurrentTerm,
+		raft.Me, snapshotData}
+	reply := InstallSnapshotReply{}
+	raft.mu.Unlock()
+	ok := raft.peers[follower].Call("Raft.InstallSnapshot", &args, &reply)
+	if ok {
+		raft.handleInstallSnapshotResult(reply, follower, raft.LastIncludedIndex)
+	}
+}
+
+func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follower int, sentLastIncludedIndex int) {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
+	if !raft.IsLeader() {
+		return
+	}
+	recvTerm := reply.Term
+	if recvTerm > raft.CurTermAndVotedFor.CurrentTerm {
+		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 的最新的term: %d, 降职为FOLLOWER",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, recvTerm)
+		raft.stepDown(recvTerm)
+		return
+	}
+	if reply.Success {
+		log.Printf("SendSnapshotRequest==> term: %d, raft-id: %d, 将snapshot同步到server: %d, sentLastIncludedIndex是:%d",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, sentLastIncludedIndex)
+		if raft.matchIndex[follower] < sentLastIncludedIndex {
+			raft.matchIndex[follower] = sentLastIncludedIndex
+		}
+		if raft.nextIndex[follower] < sentLastIncludedIndex + 1 {
+			raft.nextIndex[follower] = sentLastIncludedIndex + 1
+		}
+	}
 }
 
 /*
@@ -54,6 +94,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 	matchIndex := raft.matchIndex[follower]
 	if nextIndex <= raft.LastIncludedIndex {
 		go raft.sendSnapshotRequest(follower)
+		raft.mu.Unlock()
 		return
 	}
 
@@ -133,7 +174,7 @@ func (raft *Raft) checkCommit(endIndex int) {
 		return
 	}
 	threshold := len(raft.peers) / 2 + 1
-	commitIndex := raft.CommitIndex
+	oldCommitIndex := raft.CommitIndex
 	reachedServers := 1
 	for index := range raft.peers {
 		if index == raft.Me {
@@ -149,33 +190,27 @@ func (raft *Raft) checkCommit(endIndex int) {
 	// committed once it is stored on a majority of servers.
 	// 如果同步的log是来自之前的term，则不能立即commit
 	_, entry := raft.getLogEntry(endIndex)
-	if reachedServers >= threshold && endIndex > commitIndex &&
+	if reachedServers >= threshold && endIndex > oldCommitIndex &&
 		entry.Term == raft.CurTermAndVotedFor.CurrentTerm {
 		log.Printf("CheckCommit==> term: %d, raft-id: %d, index:%d 已经同步到 %d 个server, 最终commitIndex是: %d, 并提交状态机",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, endIndex, reachedServers, endIndex)
-		shouldCommitIndex := commitIndex + 1
-		for shouldCommitIndex <= endIndex {
-			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.Me, shouldCommitIndex)
-			_, logEntry := raft.getLogEntry(shouldCommitIndex)
-			raft.applyCh <- logEntry
-			shouldCommitIndex++
-		}
 		raft.CommitIndex = endIndex		// refresh latest commitIndex
-		go raft.persistState()
 	}
+	raft.checkApply()
+	go raft.writeRaftStatePersist()
 }
 
 func (raft *Raft) updateFollowerIndex(follower int) {
 	nextIndex := raft.nextIndex[follower]
-	if nextIndex - 1 <= raft.LastIncludedIndex {
+	if nextIndex - 2 <= raft.LastIncludedIndex {
 		raft.nextIndex[follower] = raft.LastIncludedIndex
 		return
 	}
-	_, entry := raft.getLogEntry(nextIndex - 1)
+	_, lastTimePreEntry := raft.getLogEntry(nextIndex - 1)
 	updatedNextIndex := raft.LastIncludedIndex + 1
 	for i := nextIndex - 2; i > raft.LastIncludedIndex; i-- {
-		if raft.Logs[i].Term != entry.Term {
+		_, entry := raft.getLogEntry(i)
+		if entry.Term != lastTimePreEntry.Term {
 			updatedNextIndex = i
 			break
 		}
@@ -187,7 +222,7 @@ func (raft *Raft) updateFollowerIndex(follower int) {
 	for LEADER sending heartbeat to each FOLLOWER
 */
 func (raft *Raft) doHeartbeatJob()  {
-	for raft.IsStart && raft.IsLeader() {
+	for raft.IsStart() && raft.IsLeader() {
 		go raft.syncLogsToFollowers()
 		time.Sleep(HEARTBEAT_PERIOD)
 	}

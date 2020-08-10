@@ -8,7 +8,8 @@ import (
 type State string
 
 type Raft struct {
-	mu                 sync.Mutex          // Lock to protect shared access to this peer's state
+	mu                 sync.RWMutex          // Lock to protect shared access to this peer's state
+	persistMu		   sync.RWMutex
 	peers              []*labrpc.ClientEnd // RPC end points of all peers
 	persister          *Persister          // Object to hold this peer's persisted state\
 	applyCh            chan ApplyMsg
@@ -16,7 +17,7 @@ type Raft struct {
 	lastHeartBeatTime  int64
 	matchIndex         []int
 	nextIndex          []int
-	lastApplied        int
+	OnRaftLeaderSelected func(*Raft)
 
 	// public properties, need persisted
 	LastLogIndex       int
@@ -24,15 +25,15 @@ type Raft struct {
 	CurTermAndVotedFor CurTermAndVotedFor
 	CommitIndex        int
 	Logs               []ApplyMsg
-
 	LastIncludedIndex  int
 	LastIncludedTerm   int
+	LastAppliedIndex int
+	LastAppliedTerm int
 
 	// other public properties
 	UseDummyLog		   bool
 	LeaderId           int
 	Me                 int // this peer's index into peers[]
-	IsStart            bool
 }
 
 type CurTermAndVotedFor struct {
@@ -41,7 +42,6 @@ type CurTermAndVotedFor struct {
 }
 
 type RequestVoteArgs struct {
-	// Your data here (2A, 2B).//todo
 	Term int	// candidate’s term
 	CandidateId int		// candidate requesting vote
 	LastLogIndex int	// index of candidate’s last log entr
@@ -84,10 +84,27 @@ type ApplyMsg struct {
 	Command      interface{}
 	CommandIndex int
 	Term 		 int
+	Type         MsgType
+	SnapshotData []byte
 }
 
-type SnapShot struct {
-	LastIncludedIndex int
-	LastIncludedTerm  int
-	Command   interface{}
+type MsgType string
+
+type InstallSnapshotArgs struct {
+	LastIncludedIndex  int
+	LastIncludedTerm   int
+	Term              int
+	LeaderId          int
+	SnapshotData      []byte
+}
+
+type InstallSnapshotReply struct {
+	Term int
+	Success bool
+}
+
+type PersistStruct struct {
+	raftState  []byte
+	snapshot   []byte
+	persistSeq int64
 }

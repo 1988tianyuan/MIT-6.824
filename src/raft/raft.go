@@ -1,8 +1,9 @@
 package raft
 
-import "labrpc"
-// import "bytes"
-// import "labgob"
+import (
+	"labrpc"
+	"log"
+)
 
 func (raft *Raft) Start(command interface{}) (int, int, bool) {
 	raft.mu.Lock()
@@ -11,13 +12,16 @@ func (raft *Raft) Start(command interface{}) (int, int, bool) {
 }
 
 func (raft *Raft) internalStart(command interface{}, commandValid bool) (int, int, bool) {
-	index := len(raft.Logs) + raft.LastIncludedIndex + 1
-	term := raft.CurTermAndVotedFor.CurrentTerm
+	var index int
+	var term int
 	if raft.IsLeader() {
-		raft.Logs = append(raft.Logs, ApplyMsg{CommandValid: commandValid, Term: term, CommandIndex: index, Command: command})
+		index = raft.LastLogIndex + 1
+		term = raft.CurTermAndVotedFor.CurrentTerm
+		raft.Logs = append(raft.Logs, ApplyMsg{CommandValid: commandValid, Term: term, CommandIndex: index, Command: command,
+			Type: APPEND_ENTRY})
 		raft.LastLogIndex = index
 		raft.LastLogTerm = term
-		go raft.persistState()
+		go raft.writeRaftStatePersist()
 	}
 	return index, term, raft.IsLeader()
 }
@@ -26,38 +30,15 @@ func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan 
 	return ExtensionMake(peers, me, persister, applyCh, false)
 }
 
-func (raft *Raft) getLogEntry(index int) (bool, ApplyMsg) {
-	offset := raft.getOffset(index)
-	if offset >= 0 {
-		return true, raft.Logs[offset]
-	} else {
-		return false, ApplyMsg{}
-	}
-}
-
-func (raft *Raft) GetState() (int, bool) {
-	return raft.CurTermAndVotedFor.CurrentTerm, raft.IsLeader()
-}
-
-func (raft *Raft) getOffset(index int) int {
-	if index > raft.LastIncludedIndex {
-		return index - raft.LastIncludedIndex - 1
-	} else {
-		return -1
-	}
-}
-
 func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg, useDummyLog bool) *Raft {
 	raft := &Raft{}
 	raft.peers = peers
 	raft.persister = persister
 	raft.Me = me
 	raft.state = FOLLOWER		// init with FOLLOWER state
-	raft.IsStart = true
 	raft.applyCh = applyCh
 	raft.UseDummyLog = useDummyLog
-	raft.readPersist(persister.ReadRaftState())
-
+	raft.readRaftStatePersist()
 	if raft.persister.SnapshotSize() == 0 {
 		raft.LastIncludedIndex = -1
 		raft.LastIncludedTerm = -1
@@ -68,7 +49,9 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 		raft.Logs = make([] ApplyMsg, 0)
 		if raft.persister.SnapshotSize() == 0 {
 			// init empty log for index=0
-			raft.Logs = append(raft.Logs, ApplyMsg{CommandIndex: 0, CommandValid:false})
+			raft.LastAppliedIndex = raft.LastIncludedIndex
+			raft.LastAppliedTerm = raft.LastIncludedTerm
+			raft.Logs = append(raft.Logs, ApplyMsg{CommandIndex: 0, CommandValid:false, Type: APPEND_ENTRY})
 			raft.LastLogIndex++
 		}
 	}
@@ -76,13 +59,41 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 	return raft
 }
 
-/* return true means the specific index and term log has been successfully committed by raft */
-func (raft *Raft) CheckCommittedIndexAndTerm(index int, term int) bool {
-	notCompacted, entry := raft.getLogEntry(index)
-	if notCompacted {
-		return raft.CommitIndex >= index && entry.Term == term
+
+func (raft *Raft) getLogEntry(index int) (bool, ApplyMsg) {
+	offset := raft.getOffset(index)
+	if offset >= 0 {
+		entry := raft.Logs[offset]
+		return true, entry
 	} else {
-		//TODO
-		return raft.CommitIndex >= index
+		return false, ApplyMsg{}
+	}
+}
+
+func (raft *Raft) getOffset(index int) int {
+	if index > raft.LastIncludedIndex {
+		offset := index - raft.LastIncludedIndex - 1
+		if offset >= 0 {
+			entry := raft.Logs[offset]
+			if entry.CommandIndex != index {
+				println("啊啊啊啊啊")
+			}
+		}
+		return offset
+	} else {
+		return -1
+	}
+}
+
+func (raft *Raft) checkApply() {
+	if raft.LastAppliedIndex < raft.CommitIndex {
+		beginApplyIndex := raft.LastAppliedIndex + 1
+		for beginApplyIndex <= raft.CommitIndex {
+			log.Printf("CheckApply==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
+				raft.CurTermAndVotedFor.CurrentTerm, raft.Me, beginApplyIndex)
+			_, logEntry := raft.getLogEntry(beginApplyIndex)
+			raft.applyCh <- logEntry
+			beginApplyIndex++
+		}
 	}
 }

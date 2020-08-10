@@ -34,6 +34,7 @@ type CommonReply struct {
 	WrongLeader bool
 	Err         Err
 	Content     interface{}
+	IndexAndTerm  string
 }
 
 func genCommand(op Operation, key string, value string, clientId int64, requestSeq int64) KVCommand {
@@ -49,18 +50,16 @@ type KVCommand struct {
 }
 
 type KVServer struct {
-	mu           sync.Mutex
+	mu           sync.RWMutex
 	me           int
 	rf           *raft.Raft
 	applyCh      chan raft.ApplyMsg
 	maxraftstate int // snapshot if log grows this big
 	persister    *raft.Persister
-
+	snapshotCount int
 	// public properties to persist
 	KvMap        map[string]string
 	ClientReqSeqMap map[int64]int64
-	LastAppliedIndex int
-	LastAppliedTerm int
 }
 
 func nrand() int64 {
@@ -68,4 +67,8 @@ func nrand() int64 {
 	bigx, _ := cryptoRand.Int(cryptoRand.Reader, max)
 	x := bigx.Int64()
 	return x
+}
+
+func (kv *KVServer) IsRunning() bool {
+	return kv.rf.IsStart()
 }

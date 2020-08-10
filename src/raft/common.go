@@ -10,13 +10,25 @@ const (
 	LEADER                  State = "LEADER"
 	CANDIDATE               State = "CANDIDATE"
 	FOLLOWER                State = "FOLLOWER"
+	DOWN                	State = "DOWN"
 	CANDIDATE_TIMEOUT_RANGE int64 = 400
 	HEARTBEAT_TIMEOUT_RANGE int64 = 400
 	HEARTBEAT_PERIOD              = time.Duration(100) * time.Millisecond
+	APPEND_ENTRY 			MsgType = "APPEND_ENTRY"
+	INSTALL_SNAPSHOT 		MsgType	= "INSTALL_SNAPSHOT"
+	REPLAY					MsgType = "REPLAY"
 )
 
+func (raft *Raft) RaftLock() {
+	raft.mu.Lock()
+}
+
+func (raft *Raft) RaftUnlock() {
+	raft.mu.Unlock()
+}
+
 func (raft *Raft) Kill() {
-	raft.IsStart = false
+	raft.state = DOWN
 }
 
 func (raft *Raft) isFollower() bool {

@@ -6,14 +6,14 @@ import (
 )
 
 func (raft *Raft) doCandidateJob() {
-	for raft.IsStart && !raft.IsLeader() {
+	for raft.IsStart() && !raft.IsLeader() {
 		raft.mu.Lock()
 		raft.state = CANDIDATE
 		currentTerm := raft.CurTermAndVotedFor.CurrentTerm
 		raft.CurTermAndVotedFor =
 			CurTermAndVotedFor{CurrentTerm: currentTerm + 1, VotedFor:raft.Me} // increment term and vote for self
 		timeout := makeRandomTimeout(300, CANDIDATE_TIMEOUT_RANGE)             // random election timeout
-		go raft.persistState()
+		go raft.writeRaftStatePersist()
 		go raft.beginLeaderElection(timeout)
 		raft.mu.Unlock()
 		time.Sleep(timeout)
