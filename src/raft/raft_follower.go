@@ -10,7 +10,7 @@ import (
 */
 func (raft *Raft) doFollowerJob() {
 	raft.lastHeartBeatTime = currentTimeMillis()
-	for raft.IsStart && raft.isFollower() {
+	for raft.IsStart() && raft.isFollower() {
 		timeout := makeRandomTimeout(450, HEARTBEAT_TIMEOUT_RANGE)
 		time.Sleep(makeRandomTimeout(300, 300))
 		current := currentTimeMillis()

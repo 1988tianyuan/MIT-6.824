@@ -13,37 +13,12 @@ import (
 //
 func (raft *Raft) writeRaftStatePersist() {
 	data := raft.serializeRaftState()
-	if data != nil {
-		persistSeq := currentTimeMillis()
-		raft.SaveStateAndSnapshotStruct(PersistStruct{data, nil, persistSeq})
-		if raft.MaxStateSize > 0 && raft.persister.RaftStateSize() > (raft.MaxStateSize/2)*3 &&
-			raft.LastIncludedIndex != raft.LastAppliedIndex {
-			raft.logCompact()
-		}
-	}
+	raft.persister.SaveRaftState(data)
 }
 
 func (raft *Raft) WriteRaftStateAndSnapshotPersist(snapshotBytes []byte) {
 	data := raft.serializeRaftState()
-	if data != nil {
-		persistSeq := currentTimeMillis()
-		raft.SaveStateAndSnapshotStruct(PersistStruct{data, snapshotBytes, persistSeq})
-	}
-}
-
-func (raft *Raft) SaveStateAndSnapshotStruct(persistStruct PersistStruct) {
-	raft.persistMu.Lock()
-	if persistStruct.persistSeq <= raft.persistSeq {
-		raft.persistMu.Unlock()
-		return
-	}
-	raft.persistSeq = persistStruct.persistSeq
-	if persistStruct.snapshot != nil {
-		raft.persister.SaveStateAndSnapshot(persistStruct.raftState, persistStruct.snapshot)
-	} else {
-		raft.persister.SaveRaftState(persistStruct.raftState)
-	}
-	raft.persistMu.Unlock()
+	raft.persister.SaveStateAndSnapshot(data, snapshotBytes)
 }
 
 func (raft *Raft) serializeRaftState() []byte {

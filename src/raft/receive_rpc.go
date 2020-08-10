@@ -111,19 +111,10 @@ func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 		if endIndex == 0 {
 			return
 		}
-		shouldCommitIndex := raft.CommitIndex + 1
-		for shouldCommitIndex <= endIndex {
-			log.Printf("LogAppend: term: %d, raft-id: %d, 将index:%d 提交到状态机",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.Me, shouldCommitIndex)
-			success, entry := raft.getLogEntry(shouldCommitIndex)
-			if success {
-				raft.applyCh <- entry
-			}
-			shouldCommitIndex++
-		}
 		raft.CommitIndex = endIndex
 		log.Printf("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d, 最终matchIndex是:%d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, raft.CommitIndex, matchIndex)
+		raft.checkApply()
 		go raft.writeRaftStatePersist()
 	}
 }
@@ -137,7 +128,8 @@ func (raft *Raft) appendEntries(entries []AppendEntry, matchIndex int) int {
 	}
 	for _, entry := range entries {
 		matchIndex++
-		item := ApplyMsg{CommandValid:entry.CommandValid, CommandIndex:matchIndex, Term:entry.Term, Command:entry.Command}
+		item := ApplyMsg{CommandValid:entry.CommandValid, CommandIndex:matchIndex, Term:entry.Term, Command:entry.Command,
+			Type: APPEND_ENTRY}
 		raft.Logs = append(raft.Logs, item)
 	}
 	raft.LastLogIndex = matchIndex
@@ -189,32 +181,26 @@ func (raft *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnaps
 		raft.LeaderId = args.LeaderId
 	}
 	reply.Success = true
-	recvLastAppliedIndex := args.LastAppliedIndex
-	recvLastAppliedTerm := args.LastAppliedTerm
-	if raft.CommitIndex < recvLastAppliedIndex {
-		raft.CommitIndex = recvLastAppliedIndex
+	recvLastIncludedIndex := args.LastIncludedIndex
+	recvLastIncludedTerm := args.LastIncludedTerm
+	if raft.CommitIndex < recvLastIncludedIndex {
+		raft.CommitIndex = recvLastIncludedIndex
 	}
+	log.Printf("InstallSnapshot: raft-id: %d, recvLastIncludedIndex是: %d, recvLastIncludedTerm是: %d", raft.Me,
+		recvLastIncludedIndex, recvLastIncludedTerm)
+	if recvLastIncludedIndex >= raft.LastLogIndex || recvLastIncludedIndex <= raft.LastIncludedIndex {
+		raft.LastLogIndex = recvLastIncludedIndex
+		raft.LastLogTerm = recvLastIncludedTerm
+		// all the logs have to be compacted
+		raft.Logs = make([] ApplyMsg, 0)
+	} else {
+		beginOffset := raft.getOffset(recvLastIncludedIndex) + 1
+		raft.Logs = raft.Logs[beginOffset:]
+	}
+	raft.LastIncludedIndex = recvLastIncludedIndex
+	raft.LastIncludedTerm = recvLastIncludedTerm
+	raft.LastAppliedIndex = recvLastIncludedIndex
+	raft.LastAppliedTerm = recvLastIncludedTerm
+	raft.applyCh <- ApplyMsg{SnapshotData: args.SnapshotData, Type: INSTALL_SNAPSHOT}
 	raft.mu.Unlock()
-	go raft.OnReceiveSnapshot(args.SnapshotData, recvLastAppliedIndex, recvLastAppliedTerm,
-		func(recvLastAppliedIndex int, recvLastAppliedTerm int) {
-			log.Printf("InstallSnapshot: raft-id: %d, recvLastAppliedIndex是: %d, recvLastAppliedTerm是: %d", raft.Me,
-				recvLastAppliedIndex, recvLastAppliedTerm)
-			if recvLastAppliedIndex >= raft.LastLogIndex || recvLastAppliedIndex <= raft.LastIncludedIndex {
-				raft.LastLogIndex = recvLastAppliedIndex
-				raft.LastLogTerm = recvLastAppliedTerm
-				// all the logs have to be compacted
-				raft.Logs = make([] ApplyMsg, 0)
-			} else {
-				beginOffset := raft.getOffset(recvLastAppliedIndex) + 1
-				endOffset := raft.getOffset(raft.LastLogIndex)
-				raft.Logs = raft.Logs[beginOffset + 1:endOffset + 1]
-			}
-			raft.LastIncludedIndex = recvLastAppliedIndex
-			raft.LastIncludedTerm = recvLastAppliedTerm
-			raft.LastAppliedIndex = recvLastAppliedIndex
-			raft.LastAppliedTerm = recvLastAppliedTerm
-			if len(raft.Logs) != 0 && raft.LastLogIndex != raft.Logs[len(raft.Logs) - 1].CommandIndex {
-				println("呵呵呵")
-			}
-	})
 }

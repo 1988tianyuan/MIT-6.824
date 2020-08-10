@@ -43,15 +43,14 @@ func (raft *Raft) sendSnapshotRequest(follower int) {
 		return
 	}
 	snapshotData := raft.persister.ReadSnapshot()
-	sentIndex := raft.LastAppliedIndex
-	args := InstallSnapshotArgs{sentIndex,
-		raft.LastAppliedTerm, raft.CurTermAndVotedFor.CurrentTerm,
+	args := InstallSnapshotArgs{raft.LastIncludedIndex,
+		raft.LastIncludedTerm, raft.CurTermAndVotedFor.CurrentTerm,
 		raft.Me, snapshotData}
 	reply := InstallSnapshotReply{}
 	raft.mu.Unlock()
 	ok := raft.peers[follower].Call("Raft.InstallSnapshot", &args, &reply)
 	if ok {
-		raft.handleInstallSnapshotResult(reply, follower, sentIndex)
+		raft.handleInstallSnapshotResult(reply, follower, raft.LastIncludedIndex)
 	}
 }
 
@@ -175,7 +174,7 @@ func (raft *Raft) checkCommit(endIndex int) {
 		return
 	}
 	threshold := len(raft.peers) / 2 + 1
-	commitIndex := raft.CommitIndex
+	oldCommitIndex := raft.CommitIndex
 	reachedServers := 1
 	for index := range raft.peers {
 		if index == raft.Me {
@@ -191,21 +190,14 @@ func (raft *Raft) checkCommit(endIndex int) {
 	// committed once it is stored on a majority of servers.
 	// 如果同步的log是来自之前的term，则不能立即commit
 	_, entry := raft.getLogEntry(endIndex)
-	if reachedServers >= threshold && endIndex > commitIndex &&
+	if reachedServers >= threshold && endIndex > oldCommitIndex &&
 		entry.Term == raft.CurTermAndVotedFor.CurrentTerm {
 		log.Printf("CheckCommit==> term: %d, raft-id: %d, index:%d 已经同步到 %d 个server, 最终commitIndex是: %d, 并提交状态机",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, endIndex, reachedServers, endIndex)
-		shouldCommitIndex := commitIndex + 1
-		for shouldCommitIndex <= endIndex {
-			log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.Me, shouldCommitIndex)
-			_, logEntry := raft.getLogEntry(shouldCommitIndex)
-			raft.applyCh <- logEntry
-			shouldCommitIndex++
-		}
 		raft.CommitIndex = endIndex		// refresh latest commitIndex
-		go raft.writeRaftStatePersist()
 	}
+	raft.checkApply()
+	go raft.writeRaftStatePersist()
 }
 
 func (raft *Raft) updateFollowerIndex(follower int) {
@@ -230,7 +222,7 @@ func (raft *Raft) updateFollowerIndex(follower int) {
 	for LEADER sending heartbeat to each FOLLOWER
 */
 func (raft *Raft) doHeartbeatJob()  {
-	for raft.IsStart && raft.IsLeader() {
+	for raft.IsStart() && raft.IsLeader() {
 		go raft.syncLogsToFollowers()
 		time.Sleep(HEARTBEAT_PERIOD)
 	}

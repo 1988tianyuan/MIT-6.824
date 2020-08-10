@@ -17,10 +17,7 @@ type Raft struct {
 	lastHeartBeatTime  int64
 	matchIndex         []int
 	nextIndex          []int
-	persistCh		   chan PersistStruct
-	persistSeq		   int64
 	OnRaftLeaderSelected func(*Raft)
-	OnReceiveSnapshot    func([]byte, int, int, func(int, int))
 
 	// public properties, need persisted
 	LastLogIndex       int
@@ -37,8 +34,6 @@ type Raft struct {
 	UseDummyLog		   bool
 	LeaderId           int
 	Me                 int // this peer's index into peers[]
-	IsStart            bool
-	MaxStateSize	   int
 }
 
 type CurTermAndVotedFor struct {
@@ -47,7 +42,6 @@ type CurTermAndVotedFor struct {
 }
 
 type RequestVoteArgs struct {
-	// Your data here (2A, 2B).//todo
 	Term int	// candidate’s term
 	CandidateId int		// candidate requesting vote
 	LastLogIndex int	// index of candidate’s last log entr
@@ -90,11 +84,15 @@ type ApplyMsg struct {
 	Command      interface{}
 	CommandIndex int
 	Term 		 int
+	Type         MsgType
+	SnapshotData []byte
 }
 
+type MsgType string
+
 type InstallSnapshotArgs struct {
-	LastAppliedIndex  int
-	LastAppliedTerm   int
+	LastIncludedIndex  int
+	LastIncludedTerm   int
 	Term              int
 	LeaderId          int
 	SnapshotData      []byte

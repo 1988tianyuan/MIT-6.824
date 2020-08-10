@@ -6,7 +6,7 @@ import (
 )
 
 func (raft *Raft) doCandidateJob() {
-	for raft.IsStart && !raft.IsLeader() {
+	for raft.IsStart() && !raft.IsLeader() {
 		raft.mu.Lock()
 		raft.state = CANDIDATE
 		currentTerm := raft.CurTermAndVotedFor.CurrentTerm

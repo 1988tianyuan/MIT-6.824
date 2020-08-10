@@ -56,7 +56,7 @@ type KVServer struct {
 	applyCh      chan raft.ApplyMsg
 	maxraftstate int // snapshot if log grows this big
 	persister    *raft.Persister
-
+	snapshotCount int
 	// public properties to persist
 	KvMap        map[string]string
 	ClientReqSeqMap map[int64]int64
@@ -70,5 +70,5 @@ func nrand() int64 {
 }
 
 func (kv *KVServer) IsRunning() bool {
-	return kv.rf.IsStart
+	return kv.rf.IsStart()
 }

@@ -66,21 +66,18 @@ func (kv *KVServer) Get(args *GetArgs, reply *CommonReply) {
 
 func (kv *KVServer) Kill() {
 	kv.rf.Kill()
-	// Your code here, if desired.
 }
 
 func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *KVServer {
-	// call labgob.Register on structures you want
-	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(KVCommand{})
-
 	kv := new(KVServer)
 	kv.me = me
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.persister = persister
+	kv.maxraftstate = maxraftstate
 	kv.readPersistedStore()
 	kv.rf = raft.ExtensionMake(servers, me, persister, kv.applyCh, true)
-	kv.rf.MaxStateSize = maxraftstate
+	kv.snapshotCount = 15
 	if kv.KvMap == nil {
 		kv.KvMap = make(map[string]string)
 	}
@@ -94,41 +91,57 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 		log.Printf("OnRaftLeaderSelected==> term: %d, raft-id: %d, 当前的raft状态是: %v",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, raft)
 	}
-	kv.rf.OnReceiveSnapshot = func (snapshotBytes []byte, lastIncludedIndex int, lastIncludedTerm int,
-		raftHandleFunc func(int, int)) {
-		kv.mu.Lock()
-		buffer := bytes.NewBuffer(snapshotBytes)
-		decoder := labgob.NewDecoder(buffer)
-		kv.rf.RaftLock()
-		raftHandleFunc(lastIncludedIndex, lastIncludedTerm)
-		kv.rf.RaftUnlock()
-		kv.readPersistedKvMap(decoder)
-		kv.readReqSeqMap(decoder)
-		kv.mu.Unlock()
-		kv.rf.WriteRaftStateAndSnapshotPersist(snapshotBytes)
-	}
-
 	go kv.loopApply()
+	kv.replay()
 	return kv
+}
+
+func (kv *KVServer) replay() {
+	if kv.rf.LastIncludedIndex < kv.rf.LastAppliedIndex {
+		// need to replay: from LastIncludedIndex+1 to LastAppliedIndex
+		kv.rf.ReplayRange()
+	}
 }
 
 func (kv *KVServer) loopApply() {
 	for kv.IsRunning() {
 		select {
 		case apply := <- kv.applyCh:
-			if kv.rf.LastAppliedIndex < apply.CommandIndex {
-				//kv.rf.RaftLock()
-				kv.rf.LastAppliedIndex = apply.CommandIndex
-				kv.rf.LastAppliedTerm = apply.Term
-				//kv.rf.RaftUnlock()
+			if apply.Type == raft.REPLAY {
 				kv.mu.Lock()
 				if apply.CommandValid {
 					kv.applyKVStore(apply.Command.(KVCommand))
 				}
 				kv.mu.Unlock()
-				kv.persistStore()
+			} else if apply.Type == raft.APPEND_ENTRY && kv.rf.LastAppliedIndex < apply.CommandIndex && apply.CommandValid {
+				kv.mu.Lock()
+				if apply.CommandValid {
+					kv.applyKVStore(apply.Command.(KVCommand))
+				}
+				kv.rf.LastAppliedIndex = apply.CommandIndex
+				kv.rf.LastAppliedTerm = apply.Term
+				kv.mu.Unlock()
+				kv.checkSnapshot()
+			} else if apply.Type == raft.INSTALL_SNAPSHOT {
+				kv.mu.Lock()
+				buffer := bytes.NewBuffer(apply.SnapshotData)
+				decoder := labgob.NewDecoder(buffer)
+				kv.readPersistedKvMap(decoder)
+				kv.readReqSeqMap(decoder)
+				kv.mu.Unlock()
+				kv.rf.WriteRaftStateAndSnapshotPersist(apply.SnapshotData)
 			}
 		}
+	}
+}
+
+func (kv *KVServer) checkSnapshot() {
+	if kv.maxraftstate > 0 && (kv.rf.LastAppliedIndex - kv.rf.LastIncludedIndex) > kv.snapshotCount &&
+		kv.rf.LastIncludedIndex != kv.rf.LastAppliedIndex {
+		kv.rf.LogCompact()
+		log.Printf("CheckSnapshot==> term: %d, raft-id: %d, 当前的快照是: %v",
+			kv.rf.CurTermAndVotedFor.CurrentTerm, kv.rf.Me, kv.KvMap)
+		kv.persistStore()
 	}
 }
 
