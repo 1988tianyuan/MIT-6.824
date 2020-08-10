@@ -2,7 +2,6 @@ package raft
 
 import (
 	"labrpc"
-	"log"
 )
 
 func (raft *Raft) Start(command interface{}) (int, int, bool) {
@@ -89,7 +88,7 @@ func (raft *Raft) checkApply() {
 	if raft.LastAppliedIndex < raft.CommitIndex {
 		beginApplyIndex := raft.LastAppliedIndex + 1
 		for beginApplyIndex <= raft.CommitIndex {
-			log.Printf("CheckApply==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
+			PrintLog("CheckApply==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
 				raft.CurTermAndVotedFor.CurrentTerm, raft.Me, beginApplyIndex)
 			_, logEntry := raft.getLogEntry(beginApplyIndex)
 			raft.applyCh <- logEntry

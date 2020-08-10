@@ -4,7 +4,6 @@ package raft
 
 import (
 	"fmt"
-	"log"
 )
 
 /* return true means the specific index and term log has been successfully committed by raft */
@@ -25,7 +24,7 @@ func (raft *Raft) IsApplied(index int, term int) bool {
 }
 
 func (raft *Raft) LogCompact() {
-	log.Printf("CompactLog: raft-id: %d, lastAppliedIndex是: %d, lastIncludedIndex是: %d, lastAppliedTerm是: %d", raft.Me,
+	PrintLog("CompactLog: raft-id: %d, lastAppliedIndex是: %d, lastIncludedIndex是: %d, lastAppliedTerm是: %d", raft.Me,
 		raft.LastAppliedIndex, raft.LastIncludedIndex, raft.LastAppliedTerm)
 	beginOffset := raft.getOffset(raft.LastAppliedIndex) + 1
 	raft.LastIncludedIndex = raft.LastAppliedIndex
@@ -51,7 +50,7 @@ func (raft *Raft) ReplayRange() {
 				raft.LastIncludedIndex, raft.LastAppliedIndex)
 			panic(err)
 		}
-		log.Printf("ReplayRange==> term: %d, raft-id: %d, 重放范围是:%d-%d",
+		PrintLog("ReplayRange==> term: %d, raft-id: %d, 重放范围是:%d-%d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, lastIncludedIndex + 1, lastAppliedIndex)
 		entries := raft.Logs[beginOffset : endOffset + 1]
 		for _, entry := range entries {
@@ -59,7 +58,7 @@ func (raft *Raft) ReplayRange() {
 			raft.applyCh <- entry
 		}
 	} else if lastIncludedIndex == lastAppliedIndex {
-		log.Printf("ReplayRange==> term: %d, raft-id: %d, LastIncludedIndex:%d 和 LastAppliedIndex:%d 两者相等，无需重放",
+		PrintLog("ReplayRange==> term: %d, raft-id: %d, LastIncludedIndex:%d 和 LastAppliedIndex:%d 两者相等，无需重放",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, lastIncludedIndex, lastAppliedIndex)
 	} else {
 		err := fmt.Errorf("LastIncludedIndex is %d, LastAppliedIndex is %d, " +

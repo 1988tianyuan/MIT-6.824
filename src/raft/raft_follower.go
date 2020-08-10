@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"log"
 	"time"
 )
 
@@ -16,7 +15,7 @@ func (raft *Raft) doFollowerJob() {
 		current := currentTimeMillis()
 		// leader heartbeat expired, change state to CANDIDATE and begin leader election
 		if current > (raft.lastHeartBeatTime + timeout.Nanoseconds()/1000000) && raft.isFollower() {
-			log.Printf("DoFollowerJob==> term: %d, raft-id: %d, FOLLOWER等待超时，转换为CANDIDATE",
+			PrintLog("DoFollowerJob==> term: %d, raft-id: %d, FOLLOWER等待超时，转换为CANDIDATE",
 				raft.CurTermAndVotedFor.CurrentTerm, raft.Me)
 			go raft.doCandidateJob()
 			break

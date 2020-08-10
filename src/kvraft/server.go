@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"labgob"
 	"labrpc"
-	"log"
 	"raft"
 	"strconv"
 	"time"
@@ -43,7 +42,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *CommonReply) {
 		reply.WrongLeader = true
 		return
 	}
-	log.Printf("PutAppend: 收到PutAppend, args是:%v, 当前的server是:%d", args, kv.rf.Me)
+	PrintLog("PutAppend: 收到PutAppend, args是:%v, 当前的server是:%d", args, kv.rf.Me)
 	op := args.Op
 	if op != PUT && op != APPEND {
 		reply.Err = "Wrong op, should be one of these op: Put | Append."
@@ -86,9 +85,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	}
 	kv.rf.OnRaftLeaderSelected = func (raft *raft.Raft) {
 		kvMap := &kv.KvMap
-		log.Printf("OnRaftLeaderSelected==> term: %d, raft-id: %d, 当前的快照是: %v",
+		PrintLog("OnRaftLeaderSelected==> term: %d, raft-id: %d, 当前的快照是: %v",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, *kvMap)
-		log.Printf("OnRaftLeaderSelected==> term: %d, raft-id: %d, 当前的raft状态是: %v",
+		PrintLog("OnRaftLeaderSelected==> term: %d, raft-id: %d, 当前的raft状态是: %v",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, raft)
 	}
 	go kv.loopApply()
@@ -139,7 +138,7 @@ func (kv *KVServer) checkSnapshot() {
 	if kv.maxraftstate > 0 && (kv.rf.LastAppliedIndex - kv.rf.LastIncludedIndex) > kv.snapshotCount &&
 		kv.rf.LastIncludedIndex != kv.rf.LastAppliedIndex {
 		kv.rf.LogCompact()
-		log.Printf("CheckSnapshot==> term: %d, raft-id: %d, 当前的快照是: %v",
+		PrintLog("CheckSnapshot==> term: %d, raft-id: %d, 当前的快照是: %v",
 			kv.rf.CurTermAndVotedFor.CurrentTerm, kv.rf.Me, kv.KvMap)
 		kv.persistStore()
 	}

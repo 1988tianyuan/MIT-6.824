@@ -2,6 +2,8 @@ package raftkv
 
 import (
 	cryptoRand "crypto/rand"
+	"fmt"
+	"log"
 	"math/big"
 	"raft"
 	"sync"
@@ -16,6 +18,8 @@ const (
 type Operation string
 
 type Err string
+
+var DEBUG = false
 
 // Put or Append
 type PutAppendArgs struct {
@@ -71,4 +75,11 @@ func nrand() int64 {
 
 func (kv *KVServer) IsRunning() bool {
 	return kv.rf.IsStart()
+}
+
+func PrintLog(format string, args ...interface{}) {
+	if DEBUG {
+		var s []interface{} = args
+		log.Print(fmt.Sprintf(format, s))
+	}
 }
