@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"log"
 	"time"
 )
 
@@ -18,7 +17,7 @@ func (raft *Raft) doCandidateJob() {
 		raft.mu.Unlock()
 		time.Sleep(timeout)
 		if raft.isCandidate() {		// election timeout
-			log.Printf("DoCandidateJob==> term: %d, raft-id: %d, 选举超时, 重新开始选举",
+			PrintLog("DoCandidateJob==> term: %d, raft-id: %d, 选举超时, 重新开始选举",
 				raft.CurTermAndVotedFor.CurrentTerm, raft.Me)
 		} else {
 			break
@@ -67,7 +66,7 @@ func (raft *Raft) beginLeaderElection(timeout time.Duration) {
 					return
 				}
 				if reply.VoteGranted {
-					log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 从raft:%d 处获得1票",
+					PrintLog("BeginLeaderElection==> term: %d, raft-id: %d, 从raft:%d 处获得1票",
 						raft.CurTermAndVotedFor.CurrentTerm, raft.Me, reply.Server)
 					votes++
 				}

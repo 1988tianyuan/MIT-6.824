@@ -1,22 +1,18 @@
 package raft
 
-import (
-	"log"
-)
-
 func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
 	recvTerm := args.Term
 	candidateId := args.CandidateId
-	log.Printf("RequestVote==> term: %d, raft-id: %d, 当前votedFor是%v, 给raft-id:%d投票，它的term是:%d",
+	PrintLog("RequestVote==> term: %d, raft-id: %d, 当前votedFor是%v, 给raft-id:%d投票，它的term是:%d",
 		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, raft.CurTermAndVotedFor.VotedFor, args.CandidateId, args.Term)
 	reply.VoteGranted = false
 	reply.Term = raft.CurTermAndVotedFor.CurrentTerm
 
 	// received term is smaller, reject this request and send back CurrentTerm
 	if recvTerm < raft.CurTermAndVotedFor.CurrentTerm {
-		log.Printf("RequestVote==> term: %d, raft-id: %d, 给raft-id:%d投反对票, 它的term是:%d",
+		PrintLog("RequestVote==> term: %d, raft-id: %d, 给raft-id:%d投反对票, 它的term是:%d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, args.CandidateId, args.Term)
 		return
 	}
@@ -28,13 +24,13 @@ func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		// refresh the follower's election timeout
 		raft.lastHeartBeatTime = currentTimeMillis()
 		// if haven't voted in CurrentTerm, do voteGranted and set VotedFor as the candidateId
-		log.Printf("RequestVote==> term: %d, raft-id: %d, 给raft-id:%d 投赞成票，它的term是:%d",
+		PrintLog("RequestVote==> term: %d, raft-id: %d, 给raft-id:%d 投赞成票，它的term是:%d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, args.CandidateId, args.Term)
 		raft.CurTermAndVotedFor.VotedFor = candidateId
 		reply.VoteGranted = true
 		reply.Term = recvTerm
 	} else {
-		log.Printf("RequestVote==> term: %d, raft-id: %d, 给raft-id:%d 投反对票，它的term是:%d, " +
+		PrintLog("RequestVote==> term: %d, raft-id: %d, 给raft-id:%d 投反对票，它的term是:%d, " +
 			"它的lastLogIndex是:%d, 它的lastLogTerm是:%d, 而我的lastLogIndex是:%d, 我的lastLogTerm是:%d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, args.CandidateId, args.Term,
 			args.LastLogIndex, args.LastLogTerm, raft.LastLogIndex, raft.LastLogTerm)
@@ -68,7 +64,7 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 	recvTerm := args.Term
 	reply.Term = raft.CurTermAndVotedFor.CurrentTerm
 	if raft.CurTermAndVotedFor.CurrentTerm > recvTerm {
-		log.Printf("LogAppend: raft-id: %d, 拒绝这次append，recvTerm是:%d, 而我的term是:%d", raft.Me, recvTerm,
+		PrintLog("LogAppend: raft-id: %d, 拒绝这次append，recvTerm是:%d, 而我的term是:%d", raft.Me, recvTerm,
 			raft.CurTermAndVotedFor.CurrentTerm)
 		reply.Success = false
 		return
@@ -91,9 +87,6 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 		go raft.writeRaftStatePersist()
 	}
 	reply.Success = success
-	if matchIndex == 0 && args.CommitIndex > 0 && raft.CommitIndex < args.CommitIndex {
-		println("哈哈哈")
-	}
 	go raft.doCommit(args.CommitIndex, matchIndex)
 }
 
@@ -112,7 +105,7 @@ func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 			return
 		}
 		raft.CommitIndex = endIndex
-		log.Printf("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d, 最终matchIndex是:%d",
+		PrintLog("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d, 最终matchIndex是:%d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, raft.CommitIndex, matchIndex)
 		raft.checkApply()
 		go raft.writeRaftStatePersist()
@@ -120,7 +113,7 @@ func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 }
 
 func (raft *Raft) appendEntries(entries []AppendEntry, matchIndex int) int {
-	log.Printf("LogAppend: term: %d, raft-id: %d, 开始append，当前matchIndex是%d",
+	PrintLog("LogAppend: term: %d, raft-id: %d, 开始append，当前matchIndex是%d",
 		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, matchIndex)
 	term := raft.CurTermAndVotedFor.CurrentTerm
 	if matchIndex != raft.LastLogIndex {
@@ -134,7 +127,7 @@ func (raft *Raft) appendEntries(entries []AppendEntry, matchIndex int) int {
 	}
 	raft.LastLogIndex = matchIndex
 	raft.LastLogTerm = term
-	log.Printf("LogAppend: term: %d, raft-id: %d, 结束append，最后matchIndex是%d",
+	PrintLog("LogAppend: term: %d, raft-id: %d, 结束append，最后matchIndex是%d",
 		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, matchIndex)
 	return matchIndex
 }
@@ -162,7 +155,7 @@ func (raft *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnaps
 	reply.Success = false
 	recvTerm := args.Term
 	if args.Term < raft.CurTermAndVotedFor.CurrentTerm {
-		log.Printf("InstallSnapshot: raft-id: %d, InstallSnapshot，recvTerm是:%d, 而我的term是:%d", raft.Me,
+		PrintLog("InstallSnapshot: raft-id: %d, InstallSnapshot，recvTerm是:%d, 而我的term是:%d", raft.Me,
 			recvTerm, raft.CurTermAndVotedFor.CurrentTerm)
 		reply.Term = raft.CurTermAndVotedFor.CurrentTerm
 		raft.mu.Unlock()
@@ -186,7 +179,7 @@ func (raft *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnaps
 	if raft.CommitIndex < recvLastIncludedIndex {
 		raft.CommitIndex = recvLastIncludedIndex
 	}
-	log.Printf("InstallSnapshot: raft-id: %d, recvLastIncludedIndex是: %d, recvLastIncludedTerm是: %d", raft.Me,
+	PrintLog("InstallSnapshot: raft-id: %d, recvLastIncludedIndex是: %d, recvLastIncludedTerm是: %d", raft.Me,
 		recvLastIncludedIndex, recvLastIncludedTerm)
 	if recvLastIncludedIndex >= raft.LastLogIndex || recvLastIncludedIndex <= raft.LastIncludedIndex {
 		raft.LastLogIndex = recvLastIncludedIndex

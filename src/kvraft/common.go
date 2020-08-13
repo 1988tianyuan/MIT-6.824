@@ -2,6 +2,7 @@ package raftkv
 
 import (
 	cryptoRand "crypto/rand"
+	"log"
 	"math/big"
 	"raft"
 	"sync"
@@ -16,6 +17,8 @@ const (
 type Operation string
 
 type Err string
+
+var DEBUG = true
 
 // Put or Append
 type PutAppendArgs struct {
@@ -59,7 +62,13 @@ type KVServer struct {
 	snapshotCount int
 	// public properties to persist
 	KvMap        map[string]string
+	ApplyNotifyChMap map[int]chan ApplyNoti
 	ClientReqSeqMap map[int64]int64
+}
+
+type ApplyNoti struct {
+	key string
+	value string
 }
 
 func nrand() int64 {
@@ -71,4 +80,11 @@ func nrand() int64 {
 
 func (kv *KVServer) IsRunning() bool {
 	return kv.rf.IsStart()
+}
+
+func PrintLog(format string, args ...interface{}) {
+	if DEBUG {
+		log.SetFlags(log.Lmicroseconds)
+		log.Printf(format, args...)
+	}
 }

@@ -1,13 +1,12 @@
 package raft
 
 import (
-	"log"
 	"time"
 )
 
 func (raft *Raft) changeToLeader(votes int)  {
 	raft.state = LEADER
-	log.Printf("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票",
+	PrintLog("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票",
 		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, votes)
 	go raft.doLeaderJob()
 }
@@ -62,13 +61,13 @@ func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follow
 	}
 	recvTerm := reply.Term
 	if recvTerm > raft.CurTermAndVotedFor.CurrentTerm {
-		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 的最新的term: %d, 降职为FOLLOWER",
+		PrintLog("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 的最新的term: %d, 降职为FOLLOWER",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, recvTerm)
 		raft.stepDown(recvTerm)
 		return
 	}
 	if reply.Success {
-		log.Printf("SendSnapshotRequest==> term: %d, raft-id: %d, 将snapshot同步到server: %d, sentLastIncludedIndex是:%d",
+		PrintLog("SendSnapshotRequest==> term: %d, raft-id: %d, 将snapshot同步到server: %d, sentLastIncludedIndex是:%d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, sentLastIncludedIndex)
 		if raft.matchIndex[follower] < sentLastIncludedIndex {
 			raft.matchIndex[follower] = sentLastIncludedIndex
@@ -98,7 +97,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 		return
 	}
 
-	log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 开始向server: %d 发送AppendRequest, " +
+	PrintLog("SendAppendRequest==> term: %d, raft-id: %d, 开始向server: %d 发送AppendRequest, " +
 		"matchIndex是: %d, nextIndex是 :%d",
 		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, matchIndex, nextIndex)
 	// step2: construct entries, range is from nextIndex to latestIndex
@@ -146,14 +145,14 @@ func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int
 		return
 	}
 	if recvTerm > raft.CurTermAndVotedFor.CurrentTerm {
-		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 的最新的term: %d, 降职为FOLLOWER",
+		PrintLog("SendAppendRequest==> term: %d, raft-id: %d, 收到server: %d 的最新的term: %d, 降职为FOLLOWER",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, recvTerm)
 		raft.stepDown(recvTerm)
 		return
 	}
 	success := reply.Success
 	if success {
-		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 成功将日志同步到server: %d, 最终matchIndex是: %d",
+		PrintLog("SendAppendRequest==> term: %d, raft-id: %d, 成功将日志同步到server: %d, 最终matchIndex是: %d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, endIndex)
 		if raft.matchIndex[follower] < endIndex {
 			raft.matchIndex[follower] = endIndex
@@ -161,7 +160,7 @@ func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int
 		raft.nextIndex[follower] = endIndex + 1
 		go raft.checkCommit(endIndex)
 	} else {
-		log.Printf("SendAppendRequest==> term: %d, raft-id: %d, 无法将日志同步到server: %d, 需要更新这个nextIndex: %d",
+		PrintLog("SendAppendRequest==> term: %d, raft-id: %d, 无法将日志同步到server: %d, 需要更新这个nextIndex: %d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, raft.nextIndex[follower])
 		raft.updateFollowerIndex(follower)	// refresh nextIndex of this follower
 	}
@@ -192,7 +191,7 @@ func (raft *Raft) checkCommit(endIndex int) {
 	_, entry := raft.getLogEntry(endIndex)
 	if reachedServers >= threshold && endIndex > oldCommitIndex &&
 		entry.Term == raft.CurTermAndVotedFor.CurrentTerm {
-		log.Printf("CheckCommit==> term: %d, raft-id: %d, index:%d 已经同步到 %d 个server, 最终commitIndex是: %d, 并提交状态机",
+		PrintLog("CheckCommit==> term: %d, raft-id: %d, index:%d 已经同步到 %d 个server, 最终commitIndex是: %d, 并提交状态机",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, endIndex, reachedServers, endIndex)
 		raft.CommitIndex = endIndex		// refresh latest commitIndex
 	}

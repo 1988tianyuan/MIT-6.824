@@ -3,7 +3,6 @@ package raft
 import (
 	"bytes"
 	"labgob"
-	"log"
 )
 
 //
@@ -35,7 +34,7 @@ func (raft *Raft) serializeRaftState() []byte {
 	err9 := encoder.Encode(raft.LastAppliedTerm)
 	if err1 != nil || err2 != nil || err3 != nil ||
 		err4 != nil || err5 != nil || err6 != nil || err7 != nil || err8 != nil || err9 != nil {
-		log.Printf("序列化失败！%v,%v,%v,%v,%v,%v,%v,%v,%v", err1, err2, err3, err4, err5, err6, err7, err8, err9)
+		PrintLog("序列化失败！%v,%v,%v,%v,%v,%v,%v,%v,%v", err1, err2, err3, err4, err5, err6, err7, err8, err9)
 		return nil
 	}
 	return buffer.Bytes()
@@ -71,7 +70,7 @@ func (raft *Raft) readRaftStatePersist() {
 	err9 := decoder.Decode(&LastAppliedTerm)
 	if err1 != nil || err2 != nil || err3 != nil ||
 		err4 != nil || err5 != nil || err6 != nil || err7 != nil || err8 != nil || err9 != nil {
-		log.Printf("反序列化失败！%v,%v,%v,%v,%v,%v,%v,%v,%v", err1, err2, err3, err4, err5, err6, err7, err8, err9)
+		PrintLog("反序列化失败！%v,%v,%v,%v,%v,%v,%v,%v,%v", err1, err2, err3, err4, err5, err6, err7, err8, err9)
 	} else {
 		raft.LastLogIndex = LastLogIndex
 		raft.LastLogTerm = LastLogTerm

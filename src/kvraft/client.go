@@ -2,7 +2,6 @@ package raftkv
 
 import (
 	"labrpc"
-	"log"
 	"time"
 )
 
@@ -37,10 +36,10 @@ func(ck *Clerk) request(args interface{}, rpcTarget string) (bool, interface{}) 
 	ok := ck.servers[ck.leaderIndex].Call(rpcTarget, args, &reply)
 	success := ok && !reply.WrongLeader && len(reply.Err) <= 0
 	if !success {
-		log.Printf("%v: 本次发送失败，发送的args是:%v，收到的reply是:%v, error是:%v, 是不是发到错误leader了:%v",
+		PrintLog("%v: 本次发送失败，发送的args是:%v，收到的reply是:%v, error是:%v, 是不是发到错误leader了:%v",
 			rpcTarget, args, reply, reply.Err, reply.WrongLeader)
 	} else {
-		log.Printf("%v: 本次发送成功，发送的args是:%v，收到的reply是:%v",
+		PrintLog("%v: 本次发送成功，发送的args是:%v，收到的reply是:%v",
 			rpcTarget, args, reply)
 	}
 	return success, reply.Content

@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+
 const (
 	LEADER                  State = "LEADER"
 	CANDIDATE               State = "CANDIDATE"
@@ -18,6 +19,8 @@ const (
 	INSTALL_SNAPSHOT 		MsgType	= "INSTALL_SNAPSHOT"
 	REPLAY					MsgType = "REPLAY"
 )
+
+var DEBUG = true
 
 func (raft *Raft) RaftLock() {
 	raft.mu.Lock()
@@ -47,7 +50,7 @@ func (raft *Raft) isCandidate() bool {
 func (raft *Raft) stepDown(term int)  {
 	raft.CurTermAndVotedFor = CurTermAndVotedFor{CurrentTerm: term, VotedFor:-1}
 	if !raft.isFollower() {
-		log.Printf("StepDown==> term: %d, raft-id: %d, 收到最新的term: %d, 降职为FOLLOWER",
+		PrintLog("StepDown==> term: %d, raft-id: %d, 收到最新的term: %d, 降职为FOLLOWER",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, term)
 		raft.state = FOLLOWER
 		go raft.doFollowerJob()
@@ -60,4 +63,11 @@ func makeRandomTimeout(start int64, ran int64) time.Duration {
 
 func currentTimeMillis() int64 {
 	return time.Now().UnixNano() / 1000000
+}
+
+func PrintLog(format string, args ...interface{}) {
+	if DEBUG {
+		log.SetFlags(log.Lmicroseconds)
+		log.Printf(format, args...)
+	}
 }
