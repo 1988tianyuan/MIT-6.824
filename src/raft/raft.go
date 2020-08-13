@@ -2,6 +2,7 @@ package raft
 
 import (
 	"labrpc"
+	"log"
 )
 
 func (raft *Raft) Start(command interface{}) (int, int, bool) {
@@ -42,6 +43,8 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 		raft.LastIncludedIndex = -1
 		raft.LastIncludedTerm = -1
 	}
+	PrintLog("ExtensionMake: raft-id: %d, 这时候log的长度是:%d, raft的状态是:%d", raft.Me,
+		raft.LastIncludedIndex, len(raft.Logs), raft)
 	if len(raft.Logs) == 0 {
 		raft.LastLogIndex = raft.LastIncludedIndex
 		raft.LastLogTerm = raft.LastIncludedTerm
@@ -76,6 +79,8 @@ func (raft *Raft) getOffset(index int) int {
 			entry := raft.Logs[offset]
 			if entry.CommandIndex != index {
 				println("啊啊啊啊啊")
+				panic("aaaaa")
+				log.Fatal("hhahahah")
 			}
 		}
 		return offset
@@ -88,8 +93,6 @@ func (raft *Raft) checkApply() {
 	if raft.LastAppliedIndex < raft.CommitIndex {
 		beginApplyIndex := raft.LastAppliedIndex + 1
 		for beginApplyIndex <= raft.CommitIndex {
-			PrintLog("CheckApply==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
-				raft.CurTermAndVotedFor.CurrentTerm, raft.Me, beginApplyIndex)
 			_, logEntry := raft.getLogEntry(beginApplyIndex)
 			raft.applyCh <- logEntry
 			beginApplyIndex++

@@ -6,24 +6,13 @@ import (
 	"fmt"
 )
 
-/* return true means the specific index and term log has been successfully committed by raft */
-func (raft *Raft) CheckCommittedIndexAndTerm(index int, term int) bool {
-	raft.mu.RLock()
-	defer raft.mu.RUnlock()
-	notCompacted, entry := raft.getLogEntry(index)
-	if notCompacted {
-		return raft.LastAppliedIndex >= index && entry.Term == term
-	} else {
-		//TODO
-		return raft.LastAppliedIndex >= index
+func (raft *Raft) LogCompact(snapshotCount int, afterCompact func()) {
+	raft.mu.Lock()
+	defer raft.mu.Unlock()
+	// double check
+	if (raft.LastAppliedIndex - raft.LastIncludedIndex) <= snapshotCount || raft.LastIncludedIndex == raft.LastAppliedIndex {
+		return
 	}
-}
-
-func (raft *Raft) IsApplied(index int, term int) bool {
-	return raft.LastAppliedIndex >= index && raft.LastAppliedTerm >= term
-}
-
-func (raft *Raft) LogCompact() {
 	PrintLog("CompactLog: raft-id: %d, lastAppliedIndex是: %d, lastIncludedIndex是: %d, lastAppliedTerm是: %d", raft.Me,
 		raft.LastAppliedIndex, raft.LastIncludedIndex, raft.LastAppliedTerm)
 	beginOffset := raft.getOffset(raft.LastAppliedIndex) + 1
@@ -33,8 +22,21 @@ func (raft *Raft) LogCompact() {
 		raft.Logs = raft.Logs[beginOffset:]
 	} else if raft.LastIncludedIndex == raft.LastLogIndex {
 		// all the logs have to be compacted
+		PrintLog("CompactLog: raft-id: %d, 结束, LastIncludedIndex:%d, LastLogIndex:%d, 切割完变成空的了", raft.Me,
+			raft.LastIncludedIndex, raft.LastLogIndex)
 		raft.Logs = make([] ApplyMsg, 0)
 	}
+	if len(raft.Logs) > 0 {
+		_, entry := raft.getLogEntry(raft.LastIncludedIndex + 1)
+		if entry.CommandIndex != raft.LastIncludedIndex + 1 {
+			PrintLog("CompactLog: raft-id: %d, 结束后，lastAppliedIndex是: %d, " +
+				"lastIncludedIndex是: %d, first entry index是: %d", raft.Me,
+				raft.LastAppliedIndex, raft.LastIncludedIndex, entry.CommandIndex)
+		}
+	}
+	afterCompact()
+	PrintLog("CompactLog: raft-id: %d, 顺利切割完日志啦！, LastIncludedIndex:%d, LastLogIndex:%d, log的长度:%d", raft.Me,
+		raft.LastIncludedIndex, raft.LastLogIndex, len(raft.Logs))
 }
 
 func (raft *Raft) ReplayRange() {
@@ -46,8 +48,8 @@ func (raft *Raft) ReplayRange() {
 		beginEntry := raft.Logs[beginOffset]
 		if beginEntry.CommandIndex != lastIncludedIndex + 1 {
 			err := fmt.Errorf("LastIncludedIndex is %d, LastAppliedIndex is %d, " +
-				"beginEntry's index is not the same with LastIncludedIndex+1, there must be some problem",
-				raft.LastIncludedIndex, raft.LastAppliedIndex)
+				"beginEntry's index:%d is not the same with LastIncludedIndex+1, there must be some problem",
+				raft.LastIncludedIndex, raft.LastAppliedIndex, beginEntry.CommandIndex)
 			panic(err)
 		}
 		PrintLog("ReplayRange==> term: %d, raft-id: %d, 重放范围是:%d-%d",

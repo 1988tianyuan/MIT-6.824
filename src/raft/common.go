@@ -20,7 +20,7 @@ const (
 	REPLAY					MsgType = "REPLAY"
 )
 
-var DEBUG = false
+var DEBUG = true
 
 func (raft *Raft) RaftLock() {
 	raft.mu.Lock()
@@ -67,6 +67,7 @@ func currentTimeMillis() int64 {
 
 func PrintLog(format string, args ...interface{}) {
 	if DEBUG {
-		log.Printf(format, args)
+		log.SetFlags(log.Lmicroseconds)
+		log.Printf(format, args...)
 	}
 }
