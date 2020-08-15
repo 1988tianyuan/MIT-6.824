@@ -196,7 +196,7 @@ func (raft *Raft) checkCommit(endIndex int) {
 		raft.CommitIndex = endIndex		// refresh latest commitIndex
 	}
 	raft.checkApply()
-	go raft.writeRaftStatePersist()
+	raft.writeRaftStatePersist()
 }
 
 func (raft *Raft) updateFollowerIndex(follower int) {

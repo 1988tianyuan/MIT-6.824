@@ -35,7 +35,7 @@ func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, args.CandidateId, args.Term,
 			args.LastLogIndex, args.LastLogTerm, raft.LastLogIndex, raft.LastLogTerm)
 	}
-	go raft.writeRaftStatePersist()
+	raft.writeRaftStatePersist()
 }
 
 /*
@@ -76,7 +76,7 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 		raft.stepDown(recvTerm)
 		// refresh Term in reply
 		reply.Term = raft.CurTermAndVotedFor.CurrentTerm
-		go raft.writeRaftStatePersist()
+		raft.writeRaftStatePersist()
 	}
 	if !raft.IsLeader() && raft.LeaderId != args.LeaderId {
 		raft.LeaderId = args.LeaderId
@@ -84,7 +84,7 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 	success, matchIndex := raft.logConsistencyCheck(args)
 	if success && len(args.Entries) > 0 {
 		matchIndex = raft.appendEntries(args.Entries, matchIndex)
-		go raft.writeRaftStatePersist()
+		raft.writeRaftStatePersist()
 	}
 	reply.Success = success
 	go raft.doCommit(args.CommitIndex, matchIndex)
@@ -108,7 +108,7 @@ func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 		PrintLog("LogAppend: term: %d, raft-id: %d, 最终commitIndex是:%d, 最终matchIndex是:%d",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, raft.CommitIndex, matchIndex)
 		raft.checkApply()
-		go raft.writeRaftStatePersist()
+		raft.writeRaftStatePersist()
 	}
 }
 
@@ -168,7 +168,7 @@ func (raft *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnaps
 		raft.stepDown(recvTerm)
 		// refresh Term in reply
 		reply.Term = raft.CurTermAndVotedFor.CurrentTerm
-		go raft.writeRaftStatePersist()
+		raft.writeRaftStatePersist()
 	}
 	if !raft.IsLeader() && raft.LeaderId != args.LeaderId {
 		raft.LeaderId = args.LeaderId

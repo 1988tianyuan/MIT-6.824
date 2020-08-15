@@ -34,6 +34,7 @@ type Raft struct {
 	UseDummyLog		   bool
 	LeaderId           int
 	Me                 int // this peer's index into peers[]
+	LogCompactCh	   chan struct{}
 }
 
 type CurTermAndVotedFor struct {

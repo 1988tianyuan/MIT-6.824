@@ -14,7 +14,7 @@ func (kv *KVServer) startRaft(op Operation, key string, value string, reply *Com
 	rf := kv.rf
 	curIndex, curTerm, isLeader := rf.Start(genCommand(op, key, value, clientId, requestSeq))
 	kv.mu.Lock()
-	notiCh := make(chan ApplyNoti)
+	notiCh := make(chan ApplyNoti, 1)
 	kv.ApplyNotifyChMap[curIndex] = notiCh
 	kv.mu.Unlock()
 	if !isLeader {
@@ -22,12 +22,14 @@ func (kv *KVServer) startRaft(op Operation, key string, value string, reply *Com
 	} else {
 		select {
 		case <- time.After(time.Duration(200) * time.Millisecond):
-			PrintLog("StartRaft: raft执行超时，直接返回")
-			reply.Err = "failed to execute request, please try again."
+			str := string(op) + ":" + key + ":" + value + ":" +
+				strconv.Itoa(curIndex) + ":" + strconv.Itoa(curTerm)
+			PrintLog("StartRaft: raft:%v 执行超时，直接返回", str)
+			reply.Err = "超时:failed to execute request, please try again."
 			break
 		case applyNoti := <- notiCh:
 			if !rf.IsLeader() {
-				reply.Err = "failed to execute request, please try again."
+				reply.Err = "不是leader:failed to execute request, please try again."
 				reply.WrongLeader = true
 				break
 			}
@@ -108,6 +110,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	}
 	go kv.loopApply()
 	kv.replay()
+	go kv.loopCheckSnapshot()
 	return kv
 }
 
@@ -143,10 +146,10 @@ func (kv *KVServer) loopApply() {
 				}
 				kv.rf.LastAppliedIndex = apply.CommandIndex
 				kv.rf.LastAppliedTerm = apply.Term
-				PrintLog("LoopApply==> term: %d, raft-id: %d, 将index:%d 提交到状态机",
+				PrintLog("LoopApply==> term: %d, raft-id: %d, 将index: %d提交到状态机:",
 					kv.rf.CurTermAndVotedFor.CurrentTerm, kv.rf.Me, apply.CommandIndex)
 				kv.mu.Unlock()
-				go kv.checkSnapshot()
+				//go kv.checkSnapshot(apply.CommandIndex, apply.Term)
 			} else if apply.Type == raft.INSTALL_SNAPSHOT {
 				kv.mu.Lock()
 				buffer := bytes.NewBuffer(apply.SnapshotData)
@@ -162,12 +165,17 @@ func (kv *KVServer) loopApply() {
 	}
 }
 
-func (kv *KVServer) checkSnapshot() {
-	if kv.maxraftstate > 0 && (kv.rf.LastAppliedIndex - kv.rf.LastIncludedIndex) > kv.snapshotCount &&
-		kv.rf.LastIncludedIndex != kv.rf.LastAppliedIndex {
-		kv.rf.LogCompact(kv.snapshotCount, func() {
-			kv.persistStore()
-		})
+func (kv *KVServer) loopCheckSnapshot() {
+	for kv.IsRunning() {
+		select {
+		case <- kv.rf.LogCompactCh:
+			if kv.maxraftstate > 0 && kv.persister.RaftStateSize() > (kv.maxraftstate*3)/2 &&
+				kv.rf.LastIncludedIndex != kv.rf.LastAppliedIndex {
+				kv.rf.LogCompact(kv.rf.LastAppliedIndex, kv.rf.LastAppliedTerm, kv.maxraftstate, func() {
+					kv.persistStore()
+				})
+			}
+		}
 	}
 }
 
@@ -196,7 +204,12 @@ func (kv *KVServer) applyKVStore(command KVCommand, index int) {
 			break
 		}
 	}
+
 	if applyNotiCh != nil {
+		PrintLog("LoopApply==> term: %d, raft-id: %d, 我要通知index:%d 我已经提交到状态机了",
+			kv.rf.CurTermAndVotedFor.CurrentTerm, kv.rf.Me, index)
 		applyNotiCh <- applyNoti
+		PrintLog("LoopApply==> term: %d, raft-id: %d, 我要通知index:%d 我已经提交到状态机了,通知完了！",
+			kv.rf.CurTermAndVotedFor.CurrentTerm, kv.rf.Me, index)
 	}
 }

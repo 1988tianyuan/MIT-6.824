@@ -6,18 +6,20 @@ import (
 	"fmt"
 )
 
-func (raft *Raft) LogCompact(snapshotCount int, afterCompact func()) {
+func (raft *Raft) LogCompact(lastAppliedIndex int, lastAppliedTerm int, maxRaftState int, afterCompact func()) {
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
 	// double check
-	if (raft.LastAppliedIndex - raft.LastIncludedIndex) <= snapshotCount || raft.LastIncludedIndex == raft.LastAppliedIndex {
+	PrintLog("CompactLog: raft-id: %d, 这时候raftStateSize是: %d", raft.Me,
+		raft.persister.RaftStateSize())
+	if raft.persister.RaftStateSize() <= (maxRaftState*3)/2 || raft.LastIncludedIndex >= lastAppliedIndex {
 		return
 	}
 	PrintLog("CompactLog: raft-id: %d, lastAppliedIndex是: %d, lastIncludedIndex是: %d, lastAppliedTerm是: %d", raft.Me,
-		raft.LastAppliedIndex, raft.LastIncludedIndex, raft.LastAppliedTerm)
-	beginOffset := raft.getOffset(raft.LastAppliedIndex) + 1
-	raft.LastIncludedIndex = raft.LastAppliedIndex
-	raft.LastIncludedTerm = raft.LastAppliedTerm
+		lastAppliedIndex, raft.LastIncludedIndex, lastAppliedTerm)
+	beginOffset := raft.getOffset(lastAppliedIndex) + 1
+	raft.LastIncludedIndex = lastAppliedIndex
+	raft.LastIncludedTerm = lastAppliedTerm
 	if raft.LastIncludedIndex < raft.LastLogIndex {
 		raft.Logs = raft.Logs[beginOffset:]
 	} else if raft.LastIncludedIndex == raft.LastLogIndex {
@@ -25,14 +27,6 @@ func (raft *Raft) LogCompact(snapshotCount int, afterCompact func()) {
 		PrintLog("CompactLog: raft-id: %d, 结束, LastIncludedIndex:%d, LastLogIndex:%d, 切割完变成空的了", raft.Me,
 			raft.LastIncludedIndex, raft.LastLogIndex)
 		raft.Logs = make([] ApplyMsg, 0)
-	}
-	if len(raft.Logs) > 0 {
-		_, entry := raft.getLogEntry(raft.LastIncludedIndex + 1)
-		if entry.CommandIndex != raft.LastIncludedIndex + 1 {
-			PrintLog("CompactLog: raft-id: %d, 结束后，lastAppliedIndex是: %d, " +
-				"lastIncludedIndex是: %d, first entry index是: %d", raft.Me,
-				raft.LastAppliedIndex, raft.LastIncludedIndex, entry.CommandIndex)
-		}
 	}
 	afterCompact()
 	PrintLog("CompactLog: raft-id: %d, 顺利切割完日志啦！, LastIncludedIndex:%d, LastLogIndex:%d, log的长度:%d", raft.Me,
