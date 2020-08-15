@@ -13,11 +13,13 @@ import (
 func (raft *Raft) writeRaftStatePersist() {
 	data := raft.serializeRaftState()
 	raft.persister.SaveRaftState(data)
+	go func() {raft.LogCompactCh <- struct{}{}}()
 }
 
 func (raft *Raft) WriteRaftStateAndSnapshotPersist(snapshotBytes []byte) {
 	data := raft.serializeRaftState()
 	raft.persister.SaveStateAndSnapshot(data, snapshotBytes)
+	go func() {raft.LogCompactCh <- struct{}{}}()
 }
 
 func (raft *Raft) serializeRaftState() []byte {
@@ -27,7 +29,8 @@ func (raft *Raft) serializeRaftState() []byte {
 	err2 := encoder.Encode(raft.CommitIndex)
 	err3 := encoder.Encode(raft.LastLogIndex)
 	err4 := encoder.Encode(raft.LastLogTerm)
-	err5 := encoder.Encode(raft.Logs)
+	logs := raft.Logs
+	err5 := encoder.Encode(logs)
 	err6 := encoder.Encode(raft.LastIncludedIndex)
 	err7 := encoder.Encode(raft.LastIncludedTerm)
 	err8 := encoder.Encode(raft.LastAppliedIndex)
@@ -37,6 +40,8 @@ func (raft *Raft) serializeRaftState() []byte {
 		PrintLog("序列化失败！%v,%v,%v,%v,%v,%v,%v,%v,%v", err1, err2, err3, err4, err5, err6, err7, err8, err9)
 		return nil
 	}
+	//PrintLog("SerializeRaftState: raft-id: %d, 准备持久化raft，当前log长度是%d, 状态是:%v",
+	//	raft.Me, len(logs), raft)
 	return buffer.Bytes()
 }
 

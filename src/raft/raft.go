@@ -2,7 +2,6 @@ package raft
 
 import (
 	"labrpc"
-	"log"
 )
 
 func (raft *Raft) Start(command interface{}) (int, int, bool) {
@@ -21,7 +20,7 @@ func (raft *Raft) internalStart(command interface{}, commandValid bool) (int, in
 			Type: APPEND_ENTRY})
 		raft.LastLogIndex = index
 		raft.LastLogTerm = term
-		go raft.writeRaftStatePersist()
+		raft.writeRaftStatePersist()
 	}
 	return index, term, raft.IsLeader()
 }
@@ -37,6 +36,7 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 	raft.Me = me
 	raft.state = FOLLOWER		// init with FOLLOWER state
 	raft.applyCh = applyCh
+	raft.LogCompactCh = make(chan struct{}, 100)
 	raft.UseDummyLog = useDummyLog
 	raft.readRaftStatePersist()
 	if raft.persister.SnapshotSize() == 0 {
@@ -44,7 +44,7 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 		raft.LastIncludedTerm = -1
 	}
 	PrintLog("ExtensionMake: raft-id: %d, 这时候log的长度是:%d, raft的状态是:%d", raft.Me,
-		raft.LastIncludedIndex, len(raft.Logs), raft)
+		len(raft.Logs), raft)
 	if len(raft.Logs) == 0 {
 		raft.LastLogIndex = raft.LastIncludedIndex
 		raft.LastLogTerm = raft.LastIncludedTerm
@@ -78,9 +78,7 @@ func (raft *Raft) getOffset(index int) int {
 		if offset >= 0 {
 			entry := raft.Logs[offset]
 			if entry.CommandIndex != index {
-				println("啊啊啊啊啊")
 				panic("aaaaa")
-				log.Fatal("hhahahah")
 			}
 		}
 		return offset
