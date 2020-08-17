@@ -10,8 +10,7 @@ func (raft *Raft) LogCompact(lastAppliedIndex int, lastAppliedTerm int, maxRaftS
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
 	// double check
-	PrintLog("CompactLog: raft-id: %d, 这时候raftStateSize是: %d", raft.Me,
-		raft.persister.RaftStateSize())
+	PrintLog("CompactLog: raft-id: %d, 这时候raftStateSize是: %d", raft.Me, raft.persister.RaftStateSize())
 	if raft.persister.RaftStateSize() <= (maxRaftState*3)/2 || raft.LastIncludedIndex >= lastAppliedIndex {
 		return
 	}
@@ -24,8 +23,6 @@ func (raft *Raft) LogCompact(lastAppliedIndex int, lastAppliedTerm int, maxRaftS
 		raft.Logs = raft.Logs[beginOffset:]
 	} else if raft.LastIncludedIndex == raft.LastLogIndex {
 		// all the logs have to be compacted
-		PrintLog("CompactLog: raft-id: %d, 结束, LastIncludedIndex:%d, LastLogIndex:%d, 切割完变成空的了", raft.Me,
-			raft.LastIncludedIndex, raft.LastLogIndex)
 		raft.Logs = make([] ApplyMsg, 0)
 	}
 	afterCompact()

@@ -22,9 +22,6 @@ func (kv *KVServer) startRaft(op Operation, key string, value string, reply *Com
 	} else {
 		select {
 		case <- time.After(time.Duration(200) * time.Millisecond):
-			str := string(op) + ":" + key + ":" + value + ":" +
-				strconv.Itoa(curIndex) + ":" + strconv.Itoa(curTerm)
-			PrintLog("StartRaft: raft:%v 执行超时，直接返回", str)
 			reply.Err = "超时:failed to execute request, please try again."
 			break
 		case applyNoti := <- notiCh:
@@ -118,13 +115,9 @@ func (kv *KVServer) replay() {
 	if kv.rf.LastIncludedIndex < kv.rf.LastAppliedIndex {
 		kv.mu.RLock()
 		// need to replay: from LastIncludedIndex+1 to LastAppliedIndex
-		PrintLog("Replay==> term: %d, raft-id: %d, 开始REPLAY, 现在的kvMap是: %v",
-			kv.rf.CurTermAndVotedFor.CurrentTerm, kv.rf.Me, kv.KvMap)
 		kv.mu.RUnlock()
 		kv.rf.ReplayRange()
 		kv.mu.RLock()
-		PrintLog("Replay==> term: %d, raft-id: %d, 结束REPLAY, 现在的kvMap是: %v",
-			kv.rf.CurTermAndVotedFor.CurrentTerm, kv.rf.Me, kv.KvMap)
 		kv.mu.RUnlock()
 	}
 }
@@ -206,10 +199,6 @@ func (kv *KVServer) applyKVStore(command KVCommand, index int) {
 	}
 
 	if applyNotiCh != nil {
-		PrintLog("LoopApply==> term: %d, raft-id: %d, 我要通知index:%d 我已经提交到状态机了",
-			kv.rf.CurTermAndVotedFor.CurrentTerm, kv.rf.Me, index)
 		applyNotiCh <- applyNoti
-		PrintLog("LoopApply==> term: %d, raft-id: %d, 我要通知index:%d 我已经提交到状态机了,通知完了！",
-			kv.rf.CurTermAndVotedFor.CurrentTerm, kv.rf.Me, index)
 	}
 }
