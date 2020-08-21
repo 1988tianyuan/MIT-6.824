@@ -15,8 +15,10 @@ func (raft *Raft) changeToLeader(votes int)  {
 	begin LEADER's job
 */
 func (raft *Raft) doLeaderJob()  {
-	raft.OnRaftLeaderSelected(raft)
-	raft.initFollowerIndex()
+	if raft.OnRaftLeaderSelected != nil {
+		raft.OnRaftLeaderSelected(raft)
+	}
+	raft.leaderInitialJob()
 	raft.doHeartbeatJob()
 }
 
@@ -28,7 +30,7 @@ func (raft *Raft) syncLogsToFollowers() {
 		return
 	}
 	for follower := range raft.peers {
-		if follower == raft.Me {
+		if follower == raft.Me || raft.raftJobMap[follower] == true {
 			continue
 		}
 		go raft.sendAppendRequest(follower)
@@ -76,6 +78,7 @@ func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follow
 			raft.nextIndex[follower] = sentLastIncludedIndex + 1
 		}
 	}
+	raft.raftJobMap[follower] = false
 }
 
 /*
@@ -87,6 +90,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 		raft.mu.Unlock()
 		return
 	}
+	raft.raftJobMap[follower] = true
 	// step1: init index
 	latestIndex := raft.LastLogIndex
 	nextIndex := raft.nextIndex[follower]
@@ -164,6 +168,7 @@ func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, raft.nextIndex[follower])
 		raft.updateFollowerIndex(follower)	// refresh nextIndex of this follower
 	}
+	raft.raftJobMap[follower] = false
 }
 
 func (raft *Raft) checkCommit(endIndex int) {
@@ -221,9 +226,28 @@ func (raft *Raft) updateFollowerIndex(follower int) {
 	for LEADER sending heartbeat to each FOLLOWER
 */
 func (raft *Raft) doHeartbeatJob()  {
+	t := time.NewTimer(HEARTBEAT_PERIOD)
 	for raft.IsStart() && raft.IsLeader() {
-		go raft.syncLogsToFollowers()
-		time.Sleep(HEARTBEAT_PERIOD)
+		select {
+		case <- t.C:
+			if !raft.IsLeader() {
+				return
+			}
+			raft.syncLogsToFollowers()
+			t.Reset(HEARTBEAT_PERIOD)
+			break
+		//case state := <- raft.stateChangeCh:
+		//	if state != LEADER {
+		//		return
+		//	}
+		case <- raft.doRaftJobCh:
+			if !raft.IsLeader() {
+				return
+			}
+			raft.syncLogsToFollowers()
+			t.Reset(HEARTBEAT_PERIOD)
+			break
+		}
 	}
 }
 
@@ -231,7 +255,7 @@ func (raft *Raft) doHeartbeatJob()  {
 	init each server's nextIndex as Logs's length
 	init matchIndex as 0
 */
-func (raft *Raft) initFollowerIndex()  {
+func (raft *Raft) leaderInitialJob()  {
 	raft.mu.Lock()
 	defer raft.mu.Unlock()
 	raft.LeaderId = raft.Me
@@ -247,6 +271,7 @@ func (raft *Raft) initFollowerIndex()  {
 		raft.matchIndex[server] = 0
 		raft.nextIndex[server] = raft.LastLogIndex + 1
 	}
+	raft.raftJobMap = make(map[int]bool)
 }
 
 func (raft *Raft) makePreParams(nextIndex int) (int,int) {

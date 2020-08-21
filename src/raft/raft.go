@@ -21,6 +21,7 @@ func (raft *Raft) internalStart(command interface{}, commandValid bool) (int, in
 		raft.LastLogIndex = index
 		raft.LastLogTerm = term
 		raft.writeRaftStatePersist()
+		raft.doRaftJobCh <- struct{}{}
 	}
 	return index, term, raft.IsLeader()
 }
@@ -37,13 +38,15 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 	raft.state = FOLLOWER		// init with FOLLOWER state
 	raft.applyCh = applyCh
 	raft.LogCompactCh = make(chan struct{}, 100)
+	raft.doRaftJobCh = make(chan struct{}, 1)
+	raft.stateChangeCh = make(chan State, 1)
 	raft.UseDummyLog = useDummyLog
 	raft.readRaftStatePersist()
 	if raft.persister.SnapshotSize() == 0 {
 		raft.LastIncludedIndex = -1
 		raft.LastIncludedTerm = -1
 	}
-	PrintLog("ExtensionMake: raft-id: %d, 这时候log的长度是:%d, raft的状态是:%d", raft.Me,
+	PrintLog("ExtensionMake: raft-id: %d, 这时候log的长度是:%d, raft的状态是:%v", raft.Me,
 		len(raft.Logs), raft)
 	if len(raft.Logs) == 0 {
 		raft.LastLogIndex = raft.LastIncludedIndex

@@ -13,10 +13,13 @@ type Raft struct {
 	peers              []*labrpc.ClientEnd // RPC end points of all peers
 	persister          *Persister          // Object to hold this peer's persisted state\
 	applyCh            chan ApplyMsg
+	doRaftJobCh		   chan struct{}
+	stateChangeCh	   chan State
 	state              State
 	lastHeartBeatTime  int64
 	matchIndex         []int
 	nextIndex          []int
+	raftJobMap		   map[int]bool
 	OnRaftLeaderSelected func(*Raft)
 
 	// public properties, need persisted

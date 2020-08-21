@@ -53,6 +53,7 @@ func (raft *Raft) stepDown(term int)  {
 		PrintLog("StepDown==> term: %d, raft-id: %d, 收到最新的term: %d, 降职为FOLLOWER",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, term)
 		raft.state = FOLLOWER
+		//raft.stateChangeCh <- FOLLOWER
 		go raft.doFollowerJob()
 	}
 }
