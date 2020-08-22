@@ -19,7 +19,7 @@ type Raft struct {
 	lastHeartBeatTime  int64
 	matchIndex         []int
 	nextIndex          []int
-	raftJobMap		   map[int]bool
+	raftJobMap		   sync.Map
 	OnRaftLeaderSelected func(*Raft)
 
 	// public properties, need persisted

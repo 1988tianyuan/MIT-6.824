@@ -8,6 +8,7 @@ import (
 
 func (raft *Raft) LogCompact(lastAppliedIndex int, lastAppliedTerm int, maxRaftState int, afterCompact func()) {
 	raft.mu.Lock()
+	PrintLog("LogCompact:raft:%d获取了锁", raft.Me)
 	defer raft.mu.Unlock()
 	// double check
 	PrintLog("CompactLog: raft-id: %d, 这时候raftStateSize是: %d", raft.Me, raft.persister.RaftStateSize())
@@ -50,6 +51,8 @@ func (raft *Raft) ReplayRange() {
 			entry.Type = REPLAY
 			raft.applyCh <- entry
 		}
+		PrintLog("ReplayRange==> term: %d, raft-id: %d, 重放完成了",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me)
 	} else if lastIncludedIndex == lastAppliedIndex {
 		PrintLog("ReplayRange==> term: %d, raft-id: %d, LastIncludedIndex:%d 和 LastAppliedIndex:%d 两者相等，无需重放",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, lastIncludedIndex, lastAppliedIndex)

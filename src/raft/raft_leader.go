@@ -1,25 +1,32 @@
 package raft
 
 import (
+	"sync"
 	"time"
 )
 
+/*
+	calling in raft's mutex
+*/
 func (raft *Raft) changeToLeader(votes int)  {
-	raft.state = LEADER
-	PrintLog("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票",
+	PrintLog("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票, 准备开始初始化",
 		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, votes)
-	go raft.doLeaderJob()
+	if raft.OnRaftLeaderSelected != nil {
+		raft.OnRaftLeaderSelected(raft)
+	}
+	raft.leaderInitialJob()
+	raft.state = LEADER
+	if raft.UseDummyLog {
+		raft.internalStart("", false)
+	}
+	go raft.doHeartbeatJob()
 }
 
 /*
 	begin LEADER's job
 */
 func (raft *Raft) doLeaderJob()  {
-	if raft.OnRaftLeaderSelected != nil {
-		raft.OnRaftLeaderSelected(raft)
-	}
-	raft.leaderInitialJob()
-	raft.doHeartbeatJob()
+
 }
 
 /*
@@ -29,8 +36,11 @@ func (raft *Raft) syncLogsToFollowers() {
 	if !raft.IsLeader() {
 		return
 	}
+	PrintLog("syncLogsToFollowers==> term: %d, raft-id: %d, 开始向大家同步日志咯",
+		raft.CurTermAndVotedFor.CurrentTerm, raft.Me)
 	for follower := range raft.peers {
-		if follower == raft.Me || raft.raftJobMap[follower] == true {
+		is, _ := raft.raftJobMap.Load(follower)
+		if follower == raft.Me || is == true {
 			continue
 		}
 		go raft.sendAppendRequest(follower)
@@ -39,6 +49,7 @@ func (raft *Raft) syncLogsToFollowers() {
 
 func (raft *Raft) sendSnapshotRequest(follower int) {
 	raft.mu.Lock()
+	PrintLog("sendSnapshotRequest:raft:%d获取了锁", raft.Me)
 	if !raft.IsLeader() {
 		raft.mu.Unlock()
 		return
@@ -57,6 +68,7 @@ func (raft *Raft) sendSnapshotRequest(follower int) {
 
 func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follower int, sentLastIncludedIndex int) {
 	raft.mu.Lock()
+	PrintLog("handleInstallSnapshotResult:raft:%d获取了锁", raft.Me)
 	defer raft.mu.Unlock()
 	if !raft.IsLeader() {
 		return
@@ -78,7 +90,7 @@ func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follow
 			raft.nextIndex[follower] = sentLastIncludedIndex + 1
 		}
 	}
-	raft.raftJobMap[follower] = false
+	raft.raftJobMap.Store(follower, false)
 }
 
 /*
@@ -86,11 +98,12 @@ func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follow
 */
 func (raft *Raft) sendAppendRequest(follower int)  {
 	raft.mu.Lock()
+	PrintLog("sendAppendRequest:raft:%d获取了锁", raft.Me)
 	if !raft.IsLeader() {
 		raft.mu.Unlock()
 		return
 	}
-	raft.raftJobMap[follower] = true
+	raft.raftJobMap.Store(follower, true)
 	// step1: init index
 	latestIndex := raft.LastLogIndex
 	nextIndex := raft.nextIndex[follower]
@@ -139,6 +152,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 
 func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int) {
 	raft.mu.Lock()
+	PrintLog("handleAppendEntryResult:raft:%d获取了锁", raft.Me)
 	defer raft.mu.Unlock()
 	if !raft.IsLeader() {
 		return
@@ -168,11 +182,12 @@ func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, raft.nextIndex[follower])
 		raft.updateFollowerIndex(follower)	// refresh nextIndex of this follower
 	}
-	raft.raftJobMap[follower] = false
+	raft.raftJobMap.Store(follower, false)
 }
 
 func (raft *Raft) checkCommit(endIndex int) {
 	raft.mu.Lock()
+	PrintLog("checkCommit:raft:%d获取了锁", raft.Me)
 	defer raft.mu.Unlock()
 	if raft.LastIncludedIndex >= endIndex {
 		return
@@ -228,6 +243,8 @@ func (raft *Raft) updateFollowerIndex(follower int) {
 func (raft *Raft) doHeartbeatJob()  {
 	t := time.NewTimer(HEARTBEAT_PERIOD)
 	for raft.IsStart() && raft.IsLeader() {
+		//PrintLog("DoHeartbeatJob==> term: %d, raft-id: %d, 开始做心跳任务咯",
+		//	raft.CurTermAndVotedFor.CurrentTerm, raft.Me)
 		select {
 		case <- t.C:
 			if !raft.IsLeader() {
@@ -252,18 +269,16 @@ func (raft *Raft) doHeartbeatJob()  {
 }
 
 /*
-	init each server's nextIndex as Logs's length
+	init each server's nextIndex as Logs's LastLogIndex + 1
 	init matchIndex as 0
 */
 func (raft *Raft) leaderInitialJob()  {
-	raft.mu.Lock()
-	defer raft.mu.Unlock()
+	PrintLog("LeaderInitialJob==> term: %d, raft-id: %d, 开始leader的初始化",
+		raft.CurTermAndVotedFor.CurrentTerm, raft.Me)
+	raft.doRaftJobCh = make(chan struct{}, 100)
 	raft.LeaderId = raft.Me
 	raft.matchIndex = make([]int, len(raft.peers))
 	raft.nextIndex = make([]int, len(raft.peers))
-	if raft.UseDummyLog {
-		raft.internalStart("", false)
-	}
 	for server := range raft.peers {
 		if server == raft.Me {
 			continue
@@ -271,7 +286,12 @@ func (raft *Raft) leaderInitialJob()  {
 		raft.matchIndex[server] = 0
 		raft.nextIndex[server] = raft.LastLogIndex + 1
 	}
-	raft.raftJobMap = make(map[int]bool)
+	PrintLog("LeaderInitialJob==> term: %d, raft-id: %d, 开始follower raftJobMap的初始化",
+		raft.CurTermAndVotedFor.CurrentTerm, raft.Me)
+	raft.raftJobMap = sync.Map{}
+	for i := range raft.peers {
+		raft.raftJobMap.Store(i, false)
+	}
 }
 
 func (raft *Raft) makePreParams(nextIndex int) (int,int) {

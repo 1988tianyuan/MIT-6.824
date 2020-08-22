@@ -6,6 +6,7 @@ import (
 
 func (raft *Raft) Start(command interface{}) (int, int, bool) {
 	raft.mu.Lock()
+	PrintLog("Start:raft:%d获取了锁", raft.Me)
 	defer raft.mu.Unlock()
 	return raft.internalStart(command, true)
 }
@@ -38,7 +39,6 @@ func ExtensionMake(peers []*labrpc.ClientEnd, me int, persister *Persister, appl
 	raft.state = FOLLOWER		// init with FOLLOWER state
 	raft.applyCh = applyCh
 	raft.LogCompactCh = make(chan struct{}, 100)
-	raft.doRaftJobCh = make(chan struct{}, 1)
 	raft.stateChangeCh = make(chan State, 1)
 	raft.UseDummyLog = useDummyLog
 	raft.readRaftStatePersist()

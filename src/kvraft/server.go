@@ -113,12 +113,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 func (kv *KVServer) replay() {
 	if kv.rf.LastIncludedIndex < kv.rf.LastAppliedIndex {
-		kv.mu.RLock()
 		// need to replay: from LastIncludedIndex+1 to LastAppliedIndex
-		kv.mu.RUnlock()
 		kv.rf.ReplayRange()
-		kv.mu.RLock()
-		kv.mu.RUnlock()
 	}
 }
 
