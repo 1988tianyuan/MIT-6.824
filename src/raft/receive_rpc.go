@@ -2,7 +2,6 @@ package raft
 
 func (raft *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	raft.mu.Lock()
-	PrintLog("RequestVote:raft:%d获取了锁", raft.Me)
 	defer raft.mu.Unlock()
 	recvTerm := args.Term
 	candidateId := args.CandidateId
@@ -61,7 +60,6 @@ func (raft *Raft) shouldGrant(args *RequestVoteArgs) bool {
 
 func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	raft.mu.Lock()
-	PrintLog("LogAppend:raft:%d获取了锁", raft.Me)
 	defer raft.mu.Unlock()
 	recvTerm := args.Term
 	reply.Term = raft.CurTermAndVotedFor.CurrentTerm
@@ -94,7 +92,6 @@ func (raft *Raft) LogAppend(args *AppendEntriesArgs, reply *AppendEntriesReply) 
 
 func (raft *Raft) doCommit(recvCommitIndex int, matchIndex int)  {
 	raft.mu.Lock()
-	PrintLog("doCommit:raft:%d获取了锁", raft.Me)
 	defer raft.mu.Unlock()
 	if raft.CommitIndex < recvCommitIndex && recvCommitIndex <= raft.LastLogIndex {
 		var endIndex int
@@ -155,7 +152,6 @@ func (raft *Raft) logConsistencyCheck(args *AppendEntriesArgs) (bool,int) {
 
 func (raft *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	raft.mu.Lock()
-	PrintLog("InstallSnapshot:raft:%d获取了锁", raft.Me)
 	reply.Success = false
 	recvTerm := args.Term
 	if args.Term < raft.CurTermAndVotedFor.CurrentTerm {

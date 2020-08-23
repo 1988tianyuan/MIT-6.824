@@ -8,7 +8,6 @@ import (
 
 func (raft *Raft) LogCompact(lastAppliedIndex int, lastAppliedTerm int, maxRaftState int, afterCompact func()) {
 	raft.mu.Lock()
-	PrintLog("LogCompact:raft:%d获取了锁", raft.Me)
 	defer raft.mu.Unlock()
 	// double check
 	PrintLog("CompactLog: raft-id: %d, 这时候raftStateSize是: %d", raft.Me, raft.persister.RaftStateSize())

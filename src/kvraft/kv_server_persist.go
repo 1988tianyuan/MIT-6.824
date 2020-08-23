@@ -6,8 +6,6 @@ import (
 )
 
 func (kv *KVServer) persistStore() {
-	kv.mu.RLock()
-	defer kv.mu.RUnlock()
 	buffer := new(bytes.Buffer)
 	encoder := labgob.NewEncoder(buffer)
 	err1 := encoder.Encode(kv.KvMap)

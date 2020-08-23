@@ -6,7 +6,6 @@ import (
 
 func (raft *Raft) Start(command interface{}) (int, int, bool) {
 	raft.mu.Lock()
-	PrintLog("Start:raft:%d获取了锁", raft.Me)
 	defer raft.mu.Unlock()
 	return raft.internalStart(command, true)
 }

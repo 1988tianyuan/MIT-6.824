@@ -7,7 +7,6 @@ import (
 func (raft *Raft) doCandidateJob() {
 	for raft.IsStart() && !raft.IsLeader() {
 		raft.mu.Lock()
-	PrintLog("doCandidateJob:raft:%d获取了锁", raft.Me)
 		raft.state = CANDIDATE
 		currentTerm := raft.CurTermAndVotedFor.CurrentTerm
 		raft.CurTermAndVotedFor =
@@ -33,7 +32,6 @@ func (raft *Raft) sendRequestVote(server int, args *RequestVoteArgs, replyChan c
 	ok := raft.peers[server].Call("Raft.RequestVote", args, &reply)
 	if ok {
 		raft.mu.Lock()
-	PrintLog("sendRequestVote:raft:%d获取了锁", raft.Me)
 		defer raft.mu.Unlock()
 		replyTerm := reply.Term
 		if replyTerm > raft.CurTermAndVotedFor.CurrentTerm {
@@ -73,7 +71,6 @@ func (raft *Raft) beginLeaderElection(timeout time.Duration) {
 					votes++
 				}
 				raft.mu.Lock()
-	PrintLog("for raft.isCandidate():raft:%d获取了锁", raft.Me)
 				if votes >= threshold && raft.isCandidate() {
 					raft.changeToLeader(votes)
 					raft.mu.Unlock()

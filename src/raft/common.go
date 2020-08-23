@@ -24,7 +24,6 @@ var DEBUG = true
 
 func (raft *Raft) RaftLock() {
 	raft.mu.Lock()
-	PrintLog("RaftLock:raft:%d获取了锁", raft.Me)
 }
 
 func (raft *Raft) RaftUnlock() {
