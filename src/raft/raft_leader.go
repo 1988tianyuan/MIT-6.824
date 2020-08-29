@@ -37,8 +37,7 @@ func (raft *Raft) syncLogsToFollowers() {
 		return
 	}
 	for follower := range raft.peers {
-		is, _ := raft.raftJobMap.Load(follower)
-		if follower == raft.Me || is == true {
+		if follower == raft.Me {
 			continue
 		}
 		go raft.sendAppendRequest(follower)
@@ -59,6 +58,7 @@ func (raft *Raft) sendSnapshotRequest(follower int) {
 	if ok {
 		raft.handleInstallSnapshotResult(reply, follower, raft.LastIncludedIndex)
 	}
+	raft.raftJobMap.Store(follower, false)
 }
 
 func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follower int, sentLastIncludedIndex int) {
@@ -84,7 +84,6 @@ func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follow
 			raft.nextIndex[follower] = sentLastIncludedIndex + 1
 		}
 	}
-	raft.raftJobMap.Store(follower, false)
 }
 
 /*
@@ -92,7 +91,8 @@ func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follow
 */
 func (raft *Raft) sendAppendRequest(follower int)  {
 	raft.mu.Lock()
-	if !raft.IsLeader() {
+	is, _ := raft.raftJobMap.Load(follower)
+	if !raft.IsLeader() || is == true {
 		raft.mu.Unlock()
 		return
 	}
@@ -140,6 +140,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 	if ok {
 		raft.handleAppendEntryResult(reply, follower)
 	}
+	raft.raftJobMap.Store(follower, false)
 }
 
 func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int) {
@@ -173,7 +174,6 @@ func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, raft.nextIndex[follower])
 		raft.updateFollowerIndex(follower)	// refresh nextIndex of this follower
 	}
-	raft.raftJobMap.Store(follower, false)
 }
 
 func (raft *Raft) checkCommit(endIndex int) {
