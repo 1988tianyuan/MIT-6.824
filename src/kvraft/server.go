@@ -113,12 +113,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 func (kv *KVServer) replay() {
 	if kv.rf.LastIncludedIndex < kv.rf.LastAppliedIndex {
-		kv.mu.RLock()
 		// need to replay: from LastIncludedIndex+1 to LastAppliedIndex
-		kv.mu.RUnlock()
 		kv.rf.ReplayRange()
-		kv.mu.RLock()
-		kv.mu.RUnlock()
 	}
 }
 
@@ -165,7 +161,11 @@ func (kv *KVServer) loopCheckSnapshot() {
 			if kv.maxraftstate > 0 && kv.persister.RaftStateSize() > (kv.maxraftstate*3)/2 &&
 				kv.rf.LastIncludedIndex != kv.rf.LastAppliedIndex {
 				kv.rf.LogCompact(kv.rf.LastAppliedIndex, kv.rf.LastAppliedTerm, kv.maxraftstate, func() {
+					kv.mu.RLock()
+					PrintLog("LogCompact==> term: %d, raft-id: %d, LogCompact结束后此时的kvMap是: %v",
+						kv.rf.CurTermAndVotedFor.CurrentTerm, kv.rf.Me, kv.KvMap)
 					kv.persistStore()
+					kv.mu.RUnlock()
 				})
 			}
 		}

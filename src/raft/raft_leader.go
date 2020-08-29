@@ -1,25 +1,32 @@
 package raft
 
 import (
+	"sync"
 	"time"
 )
 
+/*
+	calling in raft's mutex
+*/
 func (raft *Raft) changeToLeader(votes int)  {
-	raft.state = LEADER
-	PrintLog("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票",
+	PrintLog("BeginLeaderElection==> term: %d, raft-id: %d, 选举为LEADER, 得到%d票, 准备开始初始化",
 		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, votes)
-	go raft.doLeaderJob()
+	if raft.OnRaftLeaderSelected != nil {
+		raft.OnRaftLeaderSelected(raft)
+	}
+	raft.leaderInitialJob()
+	raft.state = LEADER
+	if raft.UseDummyLog {
+		raft.internalStart("", false)
+	}
+	go raft.doHeartbeatJob()
 }
 
 /*
 	begin LEADER's job
 */
 func (raft *Raft) doLeaderJob()  {
-	if raft.OnRaftLeaderSelected != nil {
-		raft.OnRaftLeaderSelected(raft)
-	}
-	raft.leaderInitialJob()
-	raft.doHeartbeatJob()
+
 }
 
 /*
@@ -30,7 +37,7 @@ func (raft *Raft) syncLogsToFollowers() {
 		return
 	}
 	for follower := range raft.peers {
-		if follower == raft.Me || raft.raftJobMap[follower] == true {
+		if follower == raft.Me {
 			continue
 		}
 		go raft.sendAppendRequest(follower)
@@ -38,21 +45,20 @@ func (raft *Raft) syncLogsToFollowers() {
 }
 
 func (raft *Raft) sendSnapshotRequest(follower int) {
-	raft.mu.Lock()
-	if !raft.IsLeader() {
-		raft.mu.Unlock()
-		return
-	}
 	snapshotData := raft.persister.ReadSnapshot()
 	args := InstallSnapshotArgs{raft.LastIncludedIndex,
 		raft.LastIncludedTerm, raft.CurTermAndVotedFor.CurrentTerm,
 		raft.Me, snapshotData}
 	reply := InstallSnapshotReply{}
 	raft.mu.Unlock()
+	is, _ := raft.raftJobMap.Load(follower)
+	PrintLog("SendSnapshotRequest==> term: %d, raft-id: %d, 向server: %d 发送snapshot, 此时他的raftJob状态是:%v",
+		raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, is)
 	ok := raft.peers[follower].Call("Raft.InstallSnapshot", &args, &reply)
 	if ok {
 		raft.handleInstallSnapshotResult(reply, follower, raft.LastIncludedIndex)
 	}
+	raft.raftJobMap.Store(follower, false)
 }
 
 func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follower int, sentLastIncludedIndex int) {
@@ -78,7 +84,6 @@ func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follow
 			raft.nextIndex[follower] = sentLastIncludedIndex + 1
 		}
 	}
-	raft.raftJobMap[follower] = false
 }
 
 /*
@@ -86,18 +91,18 @@ func (raft *Raft) handleInstallSnapshotResult(reply InstallSnapshotReply, follow
 */
 func (raft *Raft) sendAppendRequest(follower int)  {
 	raft.mu.Lock()
-	if !raft.IsLeader() {
+	is, _ := raft.raftJobMap.Load(follower)
+	if !raft.IsLeader() || is == true {
 		raft.mu.Unlock()
 		return
 	}
-	raft.raftJobMap[follower] = true
+	raft.raftJobMap.Store(follower, true)
 	// step1: init index
 	latestIndex := raft.LastLogIndex
 	nextIndex := raft.nextIndex[follower]
 	matchIndex := raft.matchIndex[follower]
 	if nextIndex <= raft.LastIncludedIndex {
-		go raft.sendSnapshotRequest(follower)
-		raft.mu.Unlock()
+		raft.sendSnapshotRequest(follower)
 		return
 	}
 
@@ -135,6 +140,7 @@ func (raft *Raft) sendAppendRequest(follower int)  {
 	if ok {
 		raft.handleAppendEntryResult(reply, follower)
 	}
+	raft.raftJobMap.Store(follower, false)
 }
 
 func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int) {
@@ -168,7 +174,6 @@ func (raft *Raft) handleAppendEntryResult(reply AppendEntriesReply, follower int
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, follower, raft.nextIndex[follower])
 		raft.updateFollowerIndex(follower)	// refresh nextIndex of this follower
 	}
-	raft.raftJobMap[follower] = false
 }
 
 func (raft *Raft) checkCommit(endIndex int) {
@@ -228,6 +233,8 @@ func (raft *Raft) updateFollowerIndex(follower int) {
 func (raft *Raft) doHeartbeatJob()  {
 	t := time.NewTimer(HEARTBEAT_PERIOD)
 	for raft.IsStart() && raft.IsLeader() {
+		//PrintLog("DoHeartbeatJob==> term: %d, raft-id: %d, 开始做心跳任务咯",
+		//	raft.CurTermAndVotedFor.CurrentTerm, raft.Me)
 		select {
 		case <- t.C:
 			if !raft.IsLeader() {
@@ -252,18 +259,14 @@ func (raft *Raft) doHeartbeatJob()  {
 }
 
 /*
-	init each server's nextIndex as Logs's length
+	init each server's nextIndex as Logs's LastLogIndex + 1
 	init matchIndex as 0
 */
 func (raft *Raft) leaderInitialJob()  {
-	raft.mu.Lock()
-	defer raft.mu.Unlock()
+	raft.doRaftJobCh = make(chan struct{}, 100)
 	raft.LeaderId = raft.Me
 	raft.matchIndex = make([]int, len(raft.peers))
 	raft.nextIndex = make([]int, len(raft.peers))
-	if raft.UseDummyLog {
-		raft.internalStart("", false)
-	}
 	for server := range raft.peers {
 		if server == raft.Me {
 			continue
@@ -271,7 +274,10 @@ func (raft *Raft) leaderInitialJob()  {
 		raft.matchIndex[server] = 0
 		raft.nextIndex[server] = raft.LastLogIndex + 1
 	}
-	raft.raftJobMap = make(map[int]bool)
+	raft.raftJobMap = sync.Map{}
+	for i := range raft.peers {
+		raft.raftJobMap.Store(i, false)
+	}
 }
 
 func (raft *Raft) makePreParams(nextIndex int) (int,int) {

@@ -569,7 +569,7 @@ func TestPersistConcurrent3A(t *testing.T) {
 
 func TestPersistConcurrentUnreliable3A(t *testing.T) {
 	// Test: unreliable net, restarts, many clients (3A) ...
-	GenericTest(t, "3A", 5, true, true, false, -1)
+		GenericTest(t, "3A", 5, true, true, false, -1)
 }
 
 func TestPersistPartition3A(t *testing.T) {

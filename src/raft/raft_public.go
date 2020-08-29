@@ -50,6 +50,8 @@ func (raft *Raft) ReplayRange() {
 			entry.Type = REPLAY
 			raft.applyCh <- entry
 		}
+		PrintLog("ReplayRange==> term: %d, raft-id: %d, 重放完成了",
+			raft.CurTermAndVotedFor.CurrentTerm, raft.Me)
 	} else if lastIncludedIndex == lastAppliedIndex {
 		PrintLog("ReplayRange==> term: %d, raft-id: %d, LastIncludedIndex:%d 和 LastAppliedIndex:%d 两者相等，无需重放",
 			raft.CurTermAndVotedFor.CurrentTerm, raft.Me, lastIncludedIndex, lastAppliedIndex)

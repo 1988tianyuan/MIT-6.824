@@ -74,6 +74,8 @@ func (raft *Raft) beginLeaderElection(timeout time.Duration) {
 				if votes >= threshold && raft.isCandidate() {
 					raft.changeToLeader(votes)
 					raft.mu.Unlock()
+					PrintLog("BeginLeaderElection==> term: %d, raft-id: %d, 我是leader啦！",
+						raft.CurTermAndVotedFor.CurrentTerm, raft.Me)
 					return
 				}
 				raft.mu.Unlock()
